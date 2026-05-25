@@ -40,7 +40,43 @@ The language supports typed variables and `let` Compose bindings; assignment and
 
 Triggers are file-based: drop a single `pa/<Name>.trigger.json` next to the source to pick the trigger; without one, paxc generates a default manual ("Button") trigger. Connection references go in `pa/connectionReferences.json` and end up at the flow's top level on emit.
 
-## Installing
+## Install
+
+The fastest path on Linux or macOS is the prebuilt-binary installer:
+
+```sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/excelano/paxc/releases/latest/download/paxc-installer.sh | sh
+```
+
+On Windows, in PowerShell:
+
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://github.com/excelano/paxc/releases/latest/download/paxc-installer.ps1 | iex"
+```
+
+The installer downloads the right tarball for your platform from the GitHub release, verifies its checksum, and drops both `paxc` and `paxr` into `~/.cargo/bin` (or the equivalent on Windows). Releases also ship raw tarballs (`paxc-*.tar.xz` / `.zip`) for manual installation.
+
+### Debian and Ubuntu
+
+If you've added the Excelano apt repository, paxc is also available as a `.deb`:
+
+```bash
+sudo apt install paxc
+```
+
+To add the repository (one-time setup):
+
+```bash
+curl -fsSL https://excelano.com/apt/excelano-archive-keyring.gpg | \
+  sudo tee /usr/share/keyrings/excelano-archive-keyring.gpg > /dev/null
+echo "deb [signed-by=/usr/share/keyrings/excelano-archive-keyring.gpg] https://excelano.com/apt stable main" | \
+  sudo tee /etc/apt/sources.list.d/excelano.list
+sudo apt update
+```
+
+Both `paxc` and `paxr` are installed into `/usr/bin/`, with reference docs at `/usr/share/doc/paxc/`. Supported architectures: `amd64`, `arm64`.
+
+### Build from source
 
 Requires Rust (edition 2024, toolchain 1.85+). If you don't have Rust, install it first via [rustup](https://rustup.rs).
 
@@ -48,9 +84,7 @@ Requires Rust (edition 2024, toolchain 1.85+). If you don't have Rust, install i
 cargo install --git https://github.com/excelano/paxc
 ```
 
-This builds both `paxc` and `paxr` and places them in `~/.cargo/bin/`, which should already be on your `PATH` after a standard rustup install.
-
-## Building from source
+This builds both `paxc` and `paxr` and places them in `~/.cargo/bin/`. Alternatively:
 
 ```sh
 git clone https://github.com/excelano/paxc

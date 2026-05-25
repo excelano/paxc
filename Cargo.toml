@@ -21,3 +21,30 @@ uuid = { version = "1", features = ["v4"] }
 [lib]
 name = "paxc"
 path = "src/lib.rs"
+
+[package.metadata.deb]
+maintainer = "David M. Anderson <david.anderson@excelano.com>"
+extended-description = """
+paxc compiles the pax DSL into Power Automate cloud flow definitions. Write
+terse, readable code; get the verbose definition.json that Power Automate
+expects. Companion interpreter paxr runs the same source locally for fast
+iteration without round-tripping through the PA designer. Every pax construct
+maps to a documented PA action shape, and `paxc --decode <flow.json>`
+round-trips real PA exports back to pax source for refactoring under version
+control. See REFERENCE.md (installed at /usr/share/doc/paxc/) for the full
+language reference."""
+section = "devel"
+priority = "optional"
+depends = "libc6, libgcc-s1"
+assets = [
+    ["target/release/paxc", "usr/bin/", "755"],
+    ["target/release/paxr", "usr/bin/", "755"],
+    ["README.md", "usr/share/doc/paxc/README.md", "644"],
+    ["REFERENCE.md", "usr/share/doc/paxc/REFERENCE.md", "644"],
+    ["LICENSE", "usr/share/doc/paxc/copyright", "644"],
+]
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"
