@@ -67,11 +67,7 @@ sudo apt install paxc
 To add the repository (one-time setup):
 
 ```bash
-curl -fsSL https://excelano.com/apt/excelano-archive-keyring.gpg | \
-  sudo tee /usr/share/keyrings/excelano-archive-keyring.gpg > /dev/null
-echo "deb [signed-by=/usr/share/keyrings/excelano-archive-keyring.gpg] https://excelano.com/apt stable main" | \
-  sudo tee /etc/apt/sources.list.d/excelano.list
-sudo apt update
+curl -fsSL https://excelano.com/apt/setup.sh | sudo sh
 ```
 
 Both `paxc` and `paxr` are installed into `/usr/bin/`, with reference docs at `/usr/share/doc/paxc/`. Supported architectures: `amd64`, `arm64`.
