@@ -90,6 +90,24 @@ cargo build --release
 
 The binaries will be at `target/release/paxc` and `target/release/paxr`.
 
+## Uninstall
+
+How you remove paxc depends on how you installed it. It installs two binaries, `paxc` and `paxr`, and stores no configuration or state of its own, so removing the binaries is the whole job.
+
+If you installed via apt, `apt remove` also clears the reference docs under `/usr/share/doc/paxc/`:
+
+```bash
+sudo apt remove paxc
+```
+
+If you installed via the shell installer or `cargo install`, the binaries are in `~/.cargo/bin/`:
+
+```sh
+rm ~/.cargo/bin/paxc ~/.cargo/bin/paxr
+```
+
+If you built from a clone, delete the checkout (or just `cargo clean` and `rm` the two `target/release/` binaries if you copied them onto your `PATH`).
+
 ## License
 
 MIT. See [LICENSE](LICENSE).
