@@ -1,6 +1,9 @@
 # Dependabot keeps cargo dependencies current so security fixes show up
 # as PRs rather than slipping past. Add a github-actions ecosystem entry
 # when a workflow lands under .github/workflows/.
+#
+# All cargo bumps are grouped into one weekly PR so they share a single
+# Cargo.lock change instead of stacking conflicting lockfile updates.
 version: 2
 updates:
   - package-ecosystem: cargo
@@ -10,3 +13,7 @@ updates:
     open-pull-requests-limit: 5
     commit-message:
       prefix: "deps"
+    groups:
+      cargo:
+        patterns:
+          - "*"
