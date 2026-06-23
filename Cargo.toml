@@ -1,5 +1,6 @@
 [package]
 name = "paxc"
+homepage = "https://excelano.com/paxc/"
 version = "3.7.1"
 edition = "2024"
 description = "A compiler for the pax DSL, producing Power Automate cloud flow definitions"
