@@ -56,6 +56,16 @@ powershell -ExecutionPolicy ByPass -c "irm https://github.com/excelano/paxc/rele
 
 The installer downloads the right tarball for your platform from the GitHub release, verifies its checksum, and drops both `paxc` and `paxr` into `~/.cargo/bin` (or the equivalent on Windows). Releases also ship raw tarballs (`paxc-*.tar.xz` / `.zip`) for manual installation.
 
+### With Homebrew
+
+On macOS or Linux, so `brew upgrade` keeps it current. Installs both `paxc` and `paxr`:
+
+```sh
+brew tap excelano/tap
+brew trust excelano/tap   # one-time: Homebrew gates third-party taps behind explicit trust
+brew install paxc
+```
+
 ### Debian and Ubuntu
 
 If you've added the Excelano apt repository, paxc is also available as a `.deb`:
