@@ -13,24 +13,35 @@ struct Args {
     out_dir: Option<PathBuf>,
 }
 
+const USAGE: &str = "usage: paxc [--target <pa-legacy>] [--name <NAME>] [--out <PATH>] <file.pax>\n\
+     \n\
+     With no --target: writes the Power Automate flow definition JSON to stdout.\n\
+     With --target pa-legacy: writes a legacy PA import package (.zip). Defaults:\n\
+       --name  input file basename without .pax (or pa/flow.json's displayName when present)\n\
+       --out   <name>.zip in the current directory\n\
+     \n\
+     Decode mode (round-trip ingest):\n\
+       paxc --decode <flow.json|flow.zip> [--out-dir <DIR>]\n\
+     Reads an exported PA flow definition (either the inner definition.json\n\
+     or a legacy import package .zip) and writes a .pax source file plus a\n\
+     pa/ folder of opaque action bodies to <DIR>. For a .json input, --out-dir\n\
+     defaults to the input's parent directory; for a .zip, it defaults to a\n\
+     sister directory named after the zip's stem.\n\
+     \n\
+     Other flags:\n\
+       --help, -h     print this help and exit\n\
+       --version, -V  print the version and exit";
+
+/// Print usage to stderr and exit 2 — the error path for a malformed invocation.
 fn usage() -> ! {
-    eprintln!(
-        "usage: paxc [--target <pa-legacy>] [--name <NAME>] [--out <PATH>] <file.pax>\n\
-         \n\
-         With no --target: writes the Power Automate flow definition JSON to stdout.\n\
-         With --target pa-legacy: writes a legacy PA import package (.zip). Defaults:\n\
-           --name  input file basename without .pax (or pa/flow.json's displayName when present)\n\
-           --out   <name>.zip in the current directory\n\
-         \n\
-         Decode mode (round-trip ingest):\n\
-           paxc --decode <flow.json|flow.zip> [--out-dir <DIR>]\n\
-         Reads an exported PA flow definition (either the inner definition.json\n\
-         or a legacy import package .zip) and writes a .pax source file plus a\n\
-         pa/ folder of opaque action bodies to <DIR>. For a .json input, --out-dir\n\
-         defaults to the input's parent directory; for a .zip, it defaults to a\n\
-         sister directory named after the zip's stem."
-    );
+    eprintln!("{USAGE}");
     process::exit(2);
+}
+
+/// Print usage to stdout and exit 0 — the success path for an explicit --help.
+fn help() -> ! {
+    println!("{USAGE}");
+    process::exit(0);
 }
 
 fn parse_args() -> Args {
@@ -45,6 +56,7 @@ fn parse_args() -> Args {
     let mut i = 0;
     while i < argv.len() {
         match argv[i].as_str() {
+            "--help" | "-h" => help(),
             "--version" | "-V" => {
                 println!("paxc {}", env!("CARGO_PKG_VERSION"));
                 process::exit(0);
