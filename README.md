@@ -45,7 +45,7 @@ Triggers are file-based: drop a single `pa/<Name>.trigger.json` next to the sour
 The fastest path on Linux or macOS is the prebuilt-binary installer:
 
 ```sh
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/excelano/paxc/releases/latest/download/paxc-installer.sh | sh
+curl -fsSL https://raw.githubusercontent.com/excelano/paxc/main/install.sh | sh
 ```
 
 On Windows, in PowerShell:
@@ -110,7 +110,13 @@ If you installed via apt, `apt remove` also clears the reference docs under `/us
 sudo apt remove paxc
 ```
 
-If you installed via the shell installer or `cargo install`, the binaries are in `~/.cargo/bin/`:
+If you installed via the shell installer, the uninstaller removes both binaries from `~/.cargo/bin/`:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/excelano/paxc/main/uninstall.sh | sh
+```
+
+If you used `cargo install` (or prefer to do it by hand), the binaries are in `~/.cargo/bin/`:
 
 ```sh
 rm ~/.cargo/bin/paxc ~/.cargo/bin/paxr
