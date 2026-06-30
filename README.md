@@ -42,45 +42,60 @@ Triggers are file-based: drop a single `pa/<Name>.trigger.json` next to the sour
 
 ## Install
 
-The fastest path on Linux or macOS is the prebuilt-binary installer:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/excelano/paxc/main/install.sh | sh
-```
-
-On Windows, in PowerShell:
-
-```powershell
-powershell -ExecutionPolicy ByPass -c "irm https://github.com/excelano/paxc/releases/latest/download/paxc-installer.ps1 | iex"
-```
-
-The installer downloads the right tarball for your platform from the GitHub release, verifies its checksum, and drops both `paxc` and `paxr` into `~/.cargo/bin` (or the equivalent on Windows). Releases also ship raw tarballs (`paxc-*.tar.xz` / `.zip`) for manual installation.
-
-### With Homebrew
-
-On macOS or Linux, so `brew upgrade` keeps it current. Installs both `paxc` and `paxr`:
-
-```sh
-brew tap excelano/tap
-brew trust excelano/tap   # one-time: Homebrew gates third-party taps behind explicit trust
-brew install paxc
-```
-
 ### Debian and Ubuntu
 
-If you've added the Excelano apt repository, paxc is also available as a `.deb`:
-
-```bash
-sudo apt install paxc
-```
-
-To add the repository (one-time setup):
+Add the Excelano apt repository once (one-time setup):
 
 ```bash
 curl -fsSL https://excelano.com/apt/setup.sh | sudo sh
 ```
 
+Then install the `.deb`, so `apt upgrade` keeps it current:
+
+```bash
+sudo apt install paxc
+```
+
 Both `paxc` and `paxr` are installed into `/usr/bin/`, with reference docs at `/usr/share/doc/paxc/`. Supported architectures: `amd64`, `arm64`.
+
+### Homebrew
+
+On macOS or Linux, tap and trust the repository once — Homebrew gates third-party taps behind explicit trust (one-time setup):
+
+```sh
+brew tap excelano/tap
+brew trust excelano/tap
+```
+
+Then install it, so `brew upgrade` keeps it current. Installs both `paxc` and `paxr`:
+
+```sh
+brew install paxc
+```
+
+### Prebuilt binary (Linux and macOS)
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/excelano/paxc/main/install.sh | sh
+```
+
+The installer downloads the right tarball for your platform from the GitHub release, verifies its checksum, and drops both `paxc` and `paxr` into `~/.cargo/bin` (or the equivalent on Windows). Releases also ship raw tarballs (`paxc-*.tar.xz` / `.zip`) for manual installation.
+
+### Windows
+
+In PowerShell:
+
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://github.com/excelano/paxc/releases/latest/download/paxc-installer.ps1 | iex"
+```
+
+### Cargo
+
+If you have a Rust toolchain, install the latest release from [crates.io](https://crates.io/crates/paxc). This builds and installs both `paxc` and `paxr` into `~/.cargo/bin`:
+
+```sh
+cargo install paxc
+```
 
 ### Build from source
 
