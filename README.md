@@ -102,12 +102,6 @@ cargo install paxc
 Requires Rust (edition 2024, toolchain 1.85+). If you don't have Rust, install it first via [rustup](https://rustup.rs).
 
 ```sh
-cargo install --git https://github.com/excelano/paxc
-```
-
-This builds both `paxc` and `paxr` and places them in `~/.cargo/bin/`. Alternatively:
-
-```sh
 git clone https://github.com/excelano/paxc
 cd paxc
 cargo build --release
