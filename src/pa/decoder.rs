@@ -1858,9 +1858,26 @@ mod tests {
     }
 
     #[test]
-    fn native_compose_falls_back_on_non_literal_input() {
-        // Non-empty arrays/objects can't be rendered in pax source.
+    fn native_compose_with_populated_array_lowers_to_let() {
+        // Populated array/object literals render in pax source as of the
+        // literal round-trip fix, so a Compose over a literal list decodes
+        // natively rather than falling back to a pa block.
         let action = json!({"type": "Compose", "inputs": [1, 2, 3]});
+        let bindings: HashSet<String> = HashSet::new();
+
+        let iters = HashMap::new();
+
+        let ctx = paexpr::RenderCtx::new(&bindings, &iters);
+        let stmt =
+            try_decode_native("Compose_a", "Compose", action.as_object().unwrap(), &ctx).unwrap();
+        assert_eq!(format_native_stmt(&stmt, 0), "let a = [1, 2, 3]");
+    }
+
+    #[test]
+    fn native_compose_falls_back_on_array_with_expression_element() {
+        // A list element carrying an `@`-expression can't sit inside a pax
+        // literal, so the whole Compose still falls back to a pa block.
+        let action = json!({"type": "Compose", "inputs": ["ok", "@variables('x')"]});
         let bindings: HashSet<String> = HashSet::new();
 
         let iters = HashMap::new();

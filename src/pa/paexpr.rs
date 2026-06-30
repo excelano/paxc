@@ -876,17 +876,68 @@ pub(super) fn json_to_pa_lit(v: &serde_json::Value) -> Option<PaLit> {
 }
 
 /// Top-level entry the decoder calls for a `serde_json::Value` in an action's
-/// value slot. Tries the literal path first (fastest, covers 44a), then the
-/// PA-expression-string path for `@`-flavored strings.
+/// value slot. Tries the literal path first (fastest, covers 44a), then a
+/// populated array/object literal, then the PA-expression-string path for
+/// `@`-flavored strings.
 pub(super) fn json_to_pax(v: &serde_json::Value, ctx: &RenderCtx<'_>) -> Option<String> {
+    use serde_json::Value;
     if let Some(lit) = json_to_pa_lit(v) {
         return render_literal(&lit);
     }
-    if let serde_json::Value::String(s) = v {
-        let value = parse_pa_string(s)?;
-        return render_pa_value(&value, ctx);
+    match v {
+        // Populated arrays/objects (empty ones already handled by
+        // json_to_pa_lit above). These only round-trip when every leaf is a
+        // pax literal — pax array/object literal syntax holds literals, not
+        // expressions — so an element carrying an `@`-expression makes the
+        // whole tree unrepresentable and the decoder falls back to a pa block.
+        Value::Array(_) | Value::Object(_) => json_value_to_pax_literal(v),
+        Value::String(s) => {
+            let value = parse_pa_string(s)?;
+            render_pa_value(&value, ctx)
+        }
+        _ => None,
     }
-    None
+}
+
+/// Render a `serde_json::Value` as a pax *literal* — the inverse of the
+/// literal grammar in the parser (scalars, plus `[...]` / `{...}` whose
+/// elements are themselves literals). Returns None for any string that
+/// carries PA `@`-expression magic, since those aren't valid inside a pax
+/// literal; the decoder then emits the whole value as an opaque pa block
+/// rather than producing source that wouldn't parse.
+fn json_value_to_pax_literal(v: &serde_json::Value) -> Option<String> {
+    use serde_json::Value;
+    match v {
+        Value::Null | Value::Bool(_) | Value::Number(_) => render_literal(&json_to_pa_lit(v)?),
+        Value::String(s) => match parse_pa_string(s)? {
+            PaValue::Literal(lit) => render_literal(&lit),
+            // An @-expression or template can't sit inside a pax literal.
+            PaValue::Expression(_) | PaValue::Template(_) => None,
+        },
+        Value::Array(items) => {
+            if items.is_empty() {
+                return Some("[]".to_string());
+            }
+            let parts = items
+                .iter()
+                .map(json_value_to_pax_literal)
+                .collect::<Option<Vec<_>>>()?;
+            Some(format!("[{}]", parts.join(", ")))
+        }
+        Value::Object(map) => {
+            if map.is_empty() {
+                return Some("{}".to_string());
+            }
+            let parts = map
+                .iter()
+                .map(|(k, val)| {
+                    let rendered = json_value_to_pax_literal(val)?;
+                    Some(format!("\"{}\": {}", escape_pax_string(k), rendered))
+                })
+                .collect::<Option<Vec<_>>>()?;
+            Some(format!("{{{}}}", parts.join(", ")))
+        }
+    }
 }
 
 /// Lift a `serde_json::Value` to a `PaExpr` so it can be embedded as an
@@ -1443,6 +1494,83 @@ mod tests {
         assert_eq!(
             json_to_pax(&serde_json::json!("plain"), &ctx).as_deref(),
             Some("\"plain\"")
+        );
+    }
+
+    // ---------- populated array / object literals ----------
+
+    fn empty_ctx_render(v: &serde_json::Value) -> Option<String> {
+        let bindings = HashSet::new();
+        let iters = HashMap::new();
+        let ctx = RenderCtx::new(&bindings, &iters);
+        json_to_pax(v, &ctx)
+    }
+
+    #[test]
+    fn json_to_pax_populated_string_array() {
+        assert_eq!(
+            empty_ctx_render(&serde_json::json!(["a", "b", "c"])).as_deref(),
+            Some("[\"a\", \"b\", \"c\"]")
+        );
+    }
+
+    #[test]
+    fn json_to_pax_populated_mixed_scalar_array() {
+        assert_eq!(
+            empty_ctx_render(&serde_json::json!([1, true, "x", null])).as_deref(),
+            Some("[1, true, \"x\", null]")
+        );
+    }
+
+    #[test]
+    fn json_to_pax_nested_array() {
+        assert_eq!(
+            empty_ctx_render(&serde_json::json!([[1, 2], [3]])).as_deref(),
+            Some("[[1, 2], [3]]")
+        );
+    }
+
+    #[test]
+    fn json_to_pax_populated_object() {
+        // serde_json::Map preserves insertion order with the default features,
+        // so key order here is deterministic.
+        assert_eq!(
+            empty_ctx_render(&serde_json::json!({"name": "Ada", "age": 36})).as_deref(),
+            Some("{\"name\": \"Ada\", \"age\": 36}")
+        );
+    }
+
+    #[test]
+    fn json_to_pax_nested_object_in_array() {
+        assert_eq!(
+            empty_ctx_render(&serde_json::json!([{"id": 1}, {"id": 2}])).as_deref(),
+            Some("[{\"id\": 1}, {\"id\": 2}]")
+        );
+    }
+
+    #[test]
+    fn json_to_pax_array_with_expression_element_falls_back() {
+        // An `@`-expression can't live inside a pax literal, so the whole
+        // array is unrepresentable and the decoder must fall back (None).
+        assert_eq!(
+            empty_ctx_render(&serde_json::json!(["ok", "@variables('x')"])),
+            None
+        );
+    }
+
+    #[test]
+    fn json_to_pax_object_with_expression_value_falls_back() {
+        assert_eq!(
+            empty_ctx_render(&serde_json::json!({"a": "@variables('x')"})),
+            None
+        );
+    }
+
+    #[test]
+    fn json_to_pax_string_with_quote_is_escaped() {
+        assert_eq!(
+            empty_ctx_render(&serde_json::json!(["say \"hi\""])).as_deref(),
+            Some("[\"say \\\"hi\\\"\"]")
         );
     }
 
