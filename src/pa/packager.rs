@@ -275,10 +275,11 @@ fn lowercase_var_types(actions: &mut Value) {
 /// 1. `inputs.authentication: "@parameters('$authentication')"` is exported
 ///    but rejected on import (`WorkflowRunActionInputsInvalidProperty`).
 ///    Auto-injected from `connectionReferences` at runtime, so redundant.
-/// 2. `inputs.host.connectionName` is the export label; the importer wants
-///    `inputs.host.connectionReferenceName` (same VALUE — the connection
-///    reference key — under a different field name). Without the rename
-///    the importer fails with `WorkflowRunActionInputsMissingProperty`.
+/// 2. The connection-reference key is exported under `inputs.host.connectionName`
+///    (legacy "Peek code") or `inputs.host.connection` (current "Code view"),
+///    but the importer wants `inputs.host.connectionReferenceName` (same VALUE,
+///    different field name). Without it the importer fails with
+///    `WorkflowRunActionInputsMissingProperty`.
 ///
 /// Applies to `OpenApiConnection` / `OpenApiConnectionWebhook` and recurses
 /// through container bodies to catch nested connectors.
@@ -302,16 +303,22 @@ fn fix_connector_inputs(actions: &mut Value) {
                     if let Some(host) = inputs.get_mut("host").and_then(|v| v.as_object_mut()) {
                         // PA's import-time validator wants
                         // `host.connectionReferenceName`; PA's run-/save-time
-                        // validator wants `host.connectionName`. The original
-                        // export only carries the latter, but the importer
-                        // rejects packages that lack the former. Set both to
-                        // the same connection-reference key so each validator
-                        // gets what it expects.
+                        // validator wants `host.connectionName`. The
+                        // connection-reference key travels under a different
+                        // field name depending on export vintage: the legacy
+                        // "Peek code" carried `connectionName`, while the
+                        // current designer's "Code view" emits `connection`.
+                        // Read whichever is present, set both legacy names to
+                        // that key so each validator is satisfied, and drop the
+                        // modern `connection` field so only the legacy shape
+                        // remains.
                         let conn = host
                             .get("connectionName")
                             .or_else(|| host.get("connectionReferenceName"))
+                            .or_else(|| host.get("connection"))
                             .cloned();
                         if let Some(conn) = conn {
+                            host.remove("connection");
                             host.insert("connectionName".to_string(), conn.clone());
                             host.insert("connectionReferenceName".to_string(), conn);
                         }
@@ -758,6 +765,34 @@ mod tests {
             assert!(inp["host"].get("connectionName").is_some());
             assert!(inp["host"].get("connectionReferenceName").is_some());
         }
+    }
+
+    #[test]
+    fn fix_connector_inputs_normalizes_modern_connection_field() {
+        // The current designer's "Code view" emits the connection-reference key
+        // as `host.connection` (not `connectionName`) and omits the
+        // authentication line entirely. paxc must still recover the key and
+        // produce the legacy pair the importer requires, dropping the modern
+        // `connection` field so only `connectionName` / `connectionReferenceName`
+        // remain.
+        let mut actions = json!({
+            "Send_an_email": {
+                "type": "OpenApiConnection",
+                "inputs": {
+                    "parameters": { "emailMessage/To": "you@example.com" },
+                    "host": {
+                        "apiId": "/providers/Microsoft.PowerApps/apis/shared_office365",
+                        "connection": "shared_office365",
+                        "operationId": "SendEmailV2"
+                    }
+                }
+            }
+        });
+        fix_connector_inputs(&mut actions);
+        let host = &actions["Send_an_email"]["inputs"]["host"];
+        assert!(host.get("connection").is_none());
+        assert_eq!(host["connectionName"], "shared_office365");
+        assert_eq!(host["connectionReferenceName"], "shared_office365");
     }
 
     #[test]
