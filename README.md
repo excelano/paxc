@@ -109,6 +109,20 @@ cargo build --release
 
 The binaries will be at `target/release/paxc` and `target/release/paxr`.
 
+## Use it from Claude Code
+
+paxc was built for AI coding agents as much as for people, so the repo ships an official [Claude Code](https://docs.claude.com/en/docs/claude-code) skill under [`skills/paxc/`](skills/paxc/). It teaches an agent the pax grammar, the `pa/` folder file convention (where connector bodies live), the PA accessor and path expressions, and the round-trip decoder — so it authors and maintains flows through paxc rather than routing around it to hand-edit `definition.json`. Drop it into your personal skills directory:
+
+```sh
+mkdir -p ~/.claude/skills/paxc
+for f in SKILL.md reference.md; do
+  curl -fsSL "https://raw.githubusercontent.com/excelano/paxc/main/skills/paxc/$f" \
+    -o ~/.claude/skills/paxc/$f
+done
+```
+
+Or, from a clone of this repo, `cp -r skills/paxc ~/.claude/skills/`.
+
 ## Uninstall
 
 How you remove paxc depends on how you installed it. It installs two binaries, `paxc` and `paxr`, and stores no configuration or state of its own, so removing the binaries is the whole job.
