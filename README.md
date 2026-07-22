@@ -83,7 +83,13 @@ The installer downloads the right tarball for your platform from the GitHub rele
 
 ### Windows
 
-In PowerShell:
+With [WinGet](https://learn.microsoft.com/windows/package-manager/), so `winget upgrade` keeps it current (installs both `paxc` and `paxr`):
+
+```powershell
+winget install Excelano.paxc
+```
+
+Or run the standalone installer in PowerShell:
 
 ```powershell
 powershell -ExecutionPolicy ByPass -c "irm https://github.com/excelano/paxc/releases/latest/download/paxc-installer.ps1 | iex"
