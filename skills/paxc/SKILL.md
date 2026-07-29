@@ -36,11 +36,11 @@ pax's, and it belongs in a file.
 The authoritative sources for pax and paxc are the binary itself (`paxc --help`),
 [README](https://github.com/excelano/paxc/blob/main/README.md), and
 [REFERENCE.md](https://github.com/excelano/paxc/blob/main/REFERENCE.md); if
-anything here conflicts with them, they win. These recipes assume **paxc 3.7.x**
-— the release line that ships the round-trip decoder (`paxc --decode`), the
-file-based `pa/` folder convention, the `on <status>` error-path handlers, and
-the `switch` / `until` / `scope` / `terminate` statements. Check with
-`paxc --version`; if an older copy misses any of those, upgrade with
+anything here conflicts with them, they win. These recipes assume a paxc that ships
+the round-trip decoder (`paxc --decode`), the file-based `pa/` folder convention,
+the `on <status>` error-path handlers, and the `switch` / `until` / `scope` /
+`terminate` statements. Check for `--decode` in `paxc --help`, and expect an older
+copy to reject the statement keywords as syntax errors; if any are missing, upgrade with
 `sudo apt install --only-upgrade paxc` (Debian/Ubuntu) or by re-running the
 install one-liner from the README.
 
