@@ -385,7 +385,7 @@ A few semantics worth knowing:
 - `bool` accepts `"true"` / `"false"` (case-insensitive), `"1"` / `"0"`, and the integer `0` / `1`.
 - `guid()` produces a fresh random UUID each call, so paxr runs that use it are not bit-for-bit reproducible. This matches Power Automate's runtime behavior.
 
-Date and time functions (`utcNow`, `formatDateTime`, `addMinutes`, and the rest) are not yet implemented in paxr and currently render as null under the interpreter. They continue to work correctly in Power Automate.
+Date and time functions (`utcNow`, `formatDateTime`, `addMinutes`, and the rest) render as null under the paxr interpreter — paxr does not evaluate them. They work correctly in Power Automate, so this affects local runs only.
 
 ## The pa primitive
 
@@ -552,4 +552,4 @@ Re-encoding the decoded source with `paxc --target pa-legacy` reproduces the ori
 
 ## More examples
 
-The `examples/slice*.pax` files each focus on a single feature and are useful when you want a minimal example of one thing. `examples/tour.pax` is a broader walkthrough including variables, foreach, if/else, function calls, member access, string concat, and the `pa <Name>` opaque-action primitive. Features added since the original tour (the `debug()` statement, `terminate`, the expanded paxr function library, the control-flow sweep additions of `switch`, `scope`, `until`, and `on` handlers, and the file-based trigger convention introduced in 3.0.0) appear in their dedicated slice examples rather than in the tour. Opaque action bodies live in `examples/pa/`; the file-based trigger demo lives at `examples/pa/Recurrence.trigger.json`.
+The `examples/slice*.pax` files each focus on a single feature and are useful when you want a minimal example of one thing. `examples/tour.pax` is a broader walkthrough including variables, foreach, if/else, function calls, member access, string concat, and the `pa <Name>` opaque-action primitive. The tour does not cover everything: `debug()`, `terminate`, the fuller paxr function library, the control-flow constructs `switch`, `scope`, `until`, and `on` handlers, and the file-based trigger convention each have their own slice example instead. Opaque action bodies live in `examples/pa/`; the file-based trigger demo lives at `examples/pa/Recurrence.trigger.json`.
