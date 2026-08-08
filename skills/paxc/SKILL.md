@@ -12,7 +12,13 @@ description: >-
   `.pax` source file beside it: adding an action, changing a condition, wrapping
   steps in an `on failed` handler, extracting a scope, promoting a hand-wired
   `runAfter` to source order, or turning an exported flow into source with `paxc
-  --decode`. Prefer it over hand-editing `definition.json`: pax owns the programmable
+  --decode`. Use it just as readily when there is no flow yet and someone asks for
+  one in plain language -- "build me a flow that emails the owner when an item is
+  added to the list", "automate this in Power Automate", "when someone submits the
+  form, post it to Teams" -- because PA has no authoring API an agent can drive and
+  pax is the only route from a request to a working flow; `connectors.md` carries
+  verified connector bodies so a greenfield flow does not have to start from an
+  export. Prefer it over hand-editing `definition.json`: pax owns the programmable
   parts (variables, control flow, expressions) and infers the `runAfter` graph from
   source order, replacing the click-heavy escaped-string JSON. Not for other workflow
   engines (Zapier, n8n, Logic Apps authored against its own API), and do not model
@@ -32,9 +38,16 @@ order, so you never hand-wire it.
 pax owns the programmable parts of a flow (variables, control flow, expressions).
 PA-specific parts (connector calls, ParseJson, non-default triggers, connection
 references) live in JSON files under a `pa/` folder next to the source. paxc
-drops those files verbatim into the emitted flow. This split is why an agent
-cannot "just invent" a connector body from pax syntax — the shape is PA's, not
-pax's, and it belongs in a file.
+drops those files verbatim into the emitted flow. The shape of those files is
+PA's, not pax's, which is why a connector body is written rather than modelled
+in pax syntax — and why `connectors.md` in this directory carries verified
+bodies for the connectors that come up most.
+
+**There is no other way in.** Power Automate has no authoring API an agent can
+drive; the designer is a browser surface that has to be clicked. For a human,
+pax replaces something tedious. For an agent, it replaces nothing — it is the
+only route from a request to a working flow, and the loop it makes possible is
+worked end to end below.
 
 The authoritative sources for pax and paxc are the binary itself (`paxc --help`),
 [README](https://github.com/excelano/paxc/blob/main/README.md), and
@@ -59,10 +72,14 @@ and the top-level `connectionReferences` map — those live as opaque JSON files
 under `pa/` and are referenced from source by name (`pa <Name>` for actions;
 implicit for triggers and connection references).
 
-The moment an agent is tempted to guess a connector body's JSON shape, stop and
-either paste PA's "Peek code" output into `pa/<Name>.json` verbatim, or run
-`paxc --decode` on an existing export to lift the real shape into a `pa/`
-folder. paxc does not invent connector schemas.
+Writing a connector body is expected; guessing its shape is not. What a body
+needs is the operation's `operationId` and its exact parameter keys, and there
+are three places to get them, in order: `connectors.md` in this directory, which
+carries verified bodies for SharePoint, Outlook, Teams, Forms and Approvals;
+Microsoft's connector reference at `learn.microsoft.com/connectors/<apiname>/`,
+whose parameter **Key** column is exactly what goes in `inputs.parameters`; or
+PA's own "Peek code" on an existing action, pasted verbatim, which `paxc
+--decode` will also lift out of an export wholesale.
 
 ## Running it
 
@@ -81,7 +98,7 @@ paxr -d flow.pax                                           # only debug() output
 Import → Import Package (Legacy)** path. Without `--target`, `paxc` writes flow
 JSON to stdout — useful for `diff`ing before and after a source edit.
 
-Both binaries take `--version` (or `-V`).
+Both binaries take `--version` (or `-V`) and `--help` (or `-h`).
 
 ## Language essentials
 
@@ -217,7 +234,90 @@ If a user asks the agent to "decode this flow" or "add pax source for our
 production flow," the output belongs outside the repo unless the user has
 sanitized it first.
 
+A flow authored from scratch is a milder case of the same thing. No export went
+into it, but the site URL, list ids and recipient addresses a user hands over
+still identify their tenant, so a greenfield `pa/` folder is no more committable
+than a decoded one unless those values are placeholders.
+
 ## Worked recipes
+
+### Author a connector flow end to end
+
+This is the loop the rest of the skill exists to serve. A user asks for
+something in plain language: *when someone adds an item to our Requests list,
+email the owner if it's urgent and post it to the team channel.*
+
+Three questions have to be answered by the user, because no amount of
+compiler is going to know them: which site and list, which channel, and who
+counts as the owner. Ask for them together rather than one at a time. Everything
+else the agent can do alone.
+
+Lay out the source tree. The trigger is picked up from its filename, so nothing
+in the pax source refers to it:
+
+```
+requests/
+├── requests.pax
+└── pa/
+    ├── When_an_item_is_created.trigger.json
+    ├── Send_email.json
+    ├── Post_to_channel.json
+    └── connectionReferences.json
+```
+
+The four JSON files come from `connectors.md` with the placeholders filled in.
+`connectionReferences.json` needs one entry per connector, here SharePoint,
+Outlook and Teams. The pax source carries everything else:
+
+```
+let priority = triggerBody()?["Priority"]?["Value"]
+
+var subject: string = "New request: " & triggerBody()?["Title"]
+var summary: string = subject & " — owner " & triggerBody()?["OwnerEmail"]
+
+if priority == "Urgent" {
+  pa Send_email
+}
+
+pa Post_to_channel
+```
+
+The two sides are joined by name and nothing else. `connectors.md`'s send-mail
+body reads `@variables('subject')`, and that is a live reference to the `var
+subject` above it; the same goes for `@variables('summary')` in the Teams body.
+paxc drops the file verbatim and never checks the name, so a mismatch is not a
+compile error — it is an empty subject line at run time. Any field the trigger
+already carries can be read straight from the JSON side instead, which is what
+`emailMessage/To` should be here: `"@triggerBody()?['OwnerEmail']"`.
+
+Run it locally before packaging anything. `paxr requests.pax` executes the
+source with the connector calls skipped and the trigger absent, so every
+accessor comes back null and the `if` does not fire — it proves the source
+runs and the actions are ordered as intended, not that the branch is right. To
+exercise the branch, stub the trigger fields as `var` literals first, which is
+the stub-and-fix pattern below.
+
+```sh
+paxr requests.pax                     # control flow only
+paxc requests.pax | head -40          # eyeball the emitted definition
+paxc --target pa-legacy --name requests --out requests.zip requests.pax
+```
+
+Hand the user `requests.zip` and tell them where it goes: **My flows → Import →
+Import Package (Legacy)**, then pick a connection for each of the three
+prompts, then **Import**.
+
+That last step is a human's, and deliberately so. Importing binds the flow to
+real connections — mail will go out as whoever owns the Outlook connection —
+and consent for that belongs to the person whose mailbox it is, not to the agent
+that wrote the flow. Everything up to it is the agent's, and none of it needs a
+click.
+
+If the import is rejected, the message names the action and the property, and
+that is usually enough to place the fault: a missing parameter key means the
+body was short a required field, and a complaint about a connection reference
+means `host.connectionName` and the key in `connectionReferences.json` have
+drifted apart. Fix the file, recompile, hand over a fresh zip.
 
 ### Author a flow from scratch — the stub-and-fix pattern
 
@@ -296,10 +396,17 @@ the source filename.
 - **Non-PA workflow engines** — Zapier, n8n, Temporal, and Azure Logic Apps
   authored directly against the Logic Apps API. pax targets Power Automate's
   cloud flow shape specifically.
-- **Inventing a connector body from thin air** — paxc will not model it, and
-  guessing the JSON shape produces flows PA can import but not run. Bring the
-  connector body from a real PA "Peek code" or a `--decode`d source.
+- **An unverified `operationId` or parameter key** — this is the one thing an
+  agent should not settle on its own. A guessed shape produces a flow that
+  imports and then fails at run time, which is the worst place to find out.
+  Take the body from `connectors.md`, from Microsoft's connector reference, or
+  from a peek at a real action; if none of the three answers it, say so and ask
+  rather than approximate. Nothing about this is a secrecy rule — connector
+  shapes are public API surface, and no tenant value is needed to write one.
 
-See `reference.md` in this directory for the complete language grammar,
-per-statement semantics, expression function catalog, `on`-handler naming
-rules, and the round-trip decoder's native-vs-fallback coverage matrix.
+Two more pages sit in this directory. `reference.md` has the complete language
+grammar, per-statement semantics, expression function catalog, `on`-handler
+naming rules, and the round-trip decoder's native-vs-fallback coverage matrix.
+`connectors.md` has verified `pa/` bodies for the Standard connectors that come
+up most, and the rules for reading a shape off Microsoft's connector reference
+when the one you need is not there.
