@@ -44,6 +44,8 @@ Triggers are file-based: drop a single `pa/<Name>.trigger.json` next to the sour
 
 ## Install
 
+Every install line below ends with `paxc --install-skill`. That installs the [Claude Code skill](#use-it-from-claude-code) alongside the binary, which is the one step people reliably skipped when it lived further down the page. Drop it if you do not use Claude Code — the CLI itself does not need it.
+
 ### Debian and Ubuntu
 
 Add the Excelano apt repository once (one-time setup):
@@ -55,7 +57,7 @@ curl -fsSL https://excelano.com/apt/setup.sh | sudo sh
 Then install the `.deb`, so `apt upgrade` keeps it current:
 
 ```bash
-sudo apt install paxc
+sudo apt install paxc && paxc --install-skill
 ```
 
 Both `paxc` and `paxr` are installed into `/usr/bin/`, with reference docs at `/usr/share/doc/paxc/`. Supported architectures: `amd64`, `arm64`.
@@ -72,7 +74,7 @@ brew trust excelano/tap
 Then install it, so `brew upgrade` keeps it current. Installs both `paxc` and `paxr`:
 
 ```sh
-brew install paxc
+brew install paxc && paxc --install-skill
 ```
 
 ### Prebuilt binary (Linux and macOS)
@@ -89,6 +91,7 @@ With [WinGet](https://learn.microsoft.com/windows/package-manager/), so `winget 
 
 ```powershell
 winget install Excelano.paxc
+paxc --install-skill
 ```
 
 Or run the standalone installer in PowerShell:
@@ -102,7 +105,7 @@ powershell -ExecutionPolicy ByPass -c "irm https://github.com/excelano/paxc/rele
 If you have a Rust toolchain, install the latest release from [crates.io](https://crates.io/crates/paxc). This builds and installs both `paxc` and `paxr` into `~/.cargo/bin`:
 
 ```sh
-cargo install paxc
+cargo install paxc && paxc --install-skill
 ```
 
 ### Build from source
@@ -119,17 +122,15 @@ The binaries will be at `target/release/paxc` and `target/release/paxr`.
 
 ## Use it from Claude Code
 
-paxc was built for AI coding agents as much as for people, so the repo ships an official [Claude Code](https://docs.claude.com/en/docs/claude-code) skill under [`skills/paxc/`](skills/paxc/). It teaches an agent the pax grammar, the `pa/` folder file convention (where connector bodies live), the PA accessor and path expressions, and the round-trip decoder — so it authors and maintains flows through paxc rather than routing around it to hand-edit `definition.json`. Drop it into your personal skills directory:
+paxc was built for AI coding agents as much as for people, so the repo ships an official [Claude Code](https://docs.claude.com/en/docs/claude-code) skill under [`skills/paxc/`](skills/paxc/). It teaches an agent the pax grammar, the `pa/` folder file convention (where connector bodies live), the PA accessor and path expressions, and the round-trip decoder — so it authors and maintains flows through paxc rather than routing around it to hand-edit `definition.json`. The binary installs it:
 
 ```sh
-mkdir -p ~/.claude/skills/paxc
-for f in SKILL.md reference.md; do
-  curl -fsSL "https://raw.githubusercontent.com/excelano/paxc/main/skills/paxc/$f" \
-    -o ~/.claude/skills/paxc/$f
-done
+paxc --install-skill
 ```
 
-Or, from a clone of this repo, `cp -r skills/paxc ~/.claude/skills/`.
+That writes `~/.claude/skills/paxc/` and stamps in the version it came from, so a later run reports whether the skill has fallen behind the binary rather than leaving you to notice. It is safe to re-run: an unchanged skill reports `already current` and nothing is written. `paxc --uninstall-skill` removes it. Restart Claude Code afterwards, since skills are discovered at session start.
+
+The skill is compiled into the binary, so this works the same however you installed paxc — apt, Homebrew, cargo, the curl one-liner, or a build from source.
 
 ## Uninstall
 
