@@ -249,9 +249,13 @@ filename and a valid pax identifier).
   the emitted flow's top level).
 
 Inside those JSON files you write PA expression syntax directly:
-`@{variables('x')}`, `@{outputs('Compose_x')}`, `@{triggerBody()}`. The
-convention is byte-for-byte with PA's "Peek code" output — that guarantees
-round-trip fidelity.
+`variables('x')`, `outputs('Compose_x')`, `triggerBody()`. A value that is
+nothing but an expression is written bare and keeps its type
+(`"@variables('total')"`); a value mixing text and expressions interpolates
+them one pair of braces at a time (`"<p>@{variables('total')}</p>"`) and always
+produces a string. The convention is byte-for-byte with PA's "Peek code" output
+— that guarantees round-trip fidelity. `connectors.md` has verified bodies for
+the common connectors.
 
 ## Function calls
 

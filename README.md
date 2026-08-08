@@ -14,6 +14,8 @@ The division of labour is a file convention. Connector bodies, ParseJson, and an
 
 The Power Automate browser designer is slow and click-heavy. The underlying flow definition is JSON that's technically hand-editable but structured in ways that fight you: actions are a map keyed by name, dependencies are encoded as a `runAfter` graph, and expressions live inside escaped strings. pax is a small DSL that turns all of that into source code you can actually read and maintain, and `paxc` is the compiler that emits the JSON.
 
+There is a second reason, and it has turned out to be the stronger one. Power Automate has no authoring API. An AI agent asked to build a flow cannot build one; the best it can manage is talking a person through the designer click by click, which is miserable at both ends and scales to nothing. A flow that is a text file dissolves that problem — an agent can write it, read it back, diff it, refactor it and compile it — and `paxc --decode` turns a flow that is already deployed into source, so the starting point can be what exists rather than nothing. The one step that stays human is the import, where connections are bound and consent is given, which is exactly where it belongs.
+
 Equivalent pax and JSON for initializing a counter:
 
 ```
@@ -122,7 +124,7 @@ The binaries will be at `target/release/paxc` and `target/release/paxr`.
 
 ## Use it from Claude Code
 
-paxc was built for AI coding agents as much as for people, so the repo ships an official [Claude Code](https://docs.claude.com/en/docs/claude-code) skill under [`skills/paxc/`](skills/paxc/). It teaches an agent the pax grammar, the `pa/` folder file convention (where connector bodies live), the PA accessor and path expressions, and the round-trip decoder — so it authors and maintains flows through paxc rather than routing around it to hand-edit `definition.json`. The binary installs it:
+paxc was built for AI coding agents as much as for people, so the repo ships an official [Claude Code](https://docs.claude.com/en/docs/claude-code) skill under [`skills/paxc/`](skills/paxc/). It teaches an agent the pax grammar, the `pa/` folder file convention (where connector bodies live), the PA accessor and path expressions, and the round-trip decoder — so it authors and maintains flows through paxc rather than routing around it to hand-edit `definition.json`. It also carries a [connector catalogue](skills/paxc/connectors.md) of verified `pa/` bodies for the Standard connectors that come up most, SharePoint and Outlook and Teams and Forms and Approvals, which is what lets an agent build a connector flow from a plain-language request instead of starting from somebody's export. Every body in it is placeholdered and checked against a real flow definition by the test suite. The binary installs it:
 
 ```sh
 paxc --install-skill
