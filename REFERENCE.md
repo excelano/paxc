@@ -130,6 +130,15 @@ var windows_path: string = "C:\\Users\\david"
 
 String literals use double quotes. The recognized escape sequences are `\n` (newline), `\t` (tab), `\"` (embedded quote), and `\\` (backslash). Power Automate's expression language uses single-quoted strings internally, so paxc rewrites the quote convention and escapes for you when emitting JSON.
 
+## Comments
+
+```
+// everything from // to the end of the line is a comment
+var counter: int = 0    // including after a statement
+```
+
+`//` starts a line comment and runs to the end of the line. There is no block comment form, and `#` is not a comment -- it is a lex error, which is worth knowing because so many configuration languages take it. Comments are lexical, so they leave nothing behind in the emitted flow; a note meant to survive into Power Automate belongs in a `debug()` call or in a `pa/` file, not in a comment.
+
 ## Expressions
 
 pax expressions cover arithmetic on ints, comparison, boolean logic, string concatenation, and function calls. Operators and their precedence:

@@ -111,6 +111,13 @@ pub fn from_lex_error(err: &Rich<'_, char, Span>) -> Diagnostic {
             "pax strings are double-quoted -- try `\"...\"`. Single quotes are PA expression syntax, which belongs inside `pa/*.json`, not in pax source",
         );
     }
+    // A `#` is nearly always a comment written in the habit of another
+    // language -- YAML, TOML, shell, Python all take it, and a reader who has
+    // written no pax yet has no reason to expect otherwise. Naming the form
+    // pax does take is more use than listing the tokens it does not.
+    if err.found() == Some(&'#') {
+        return diag.with_note("pax comments start with `//` and run to the end of the line");
+    }
     diag
 }
 
@@ -270,6 +277,17 @@ mod tests {
         assert_eq!(diag.notes.len(), 1, "{:?}", diag.notes);
         assert!(diag.notes[0].contains("double-quoted"));
         assert!(diag.notes[0].contains("pa/*.json"));
+    }
+
+    #[test]
+    fn hash_lex_error_names_the_comment_form() {
+        // Four config languages a reader is likelier to have written than pax
+        // take `#` for a comment. The token list doesn't mention `//` at all.
+        let src = "# a comment\nvar x: int = 1";
+        let errs = crate::lexer::lexer().parse(src).into_errors();
+        let diag = from_lex_error(errs.first().expect("expected a lex error"));
+        assert_eq!(diag.notes.len(), 1, "{:?}", diag.notes);
+        assert!(diag.notes[0].contains("//"));
     }
 
     #[test]

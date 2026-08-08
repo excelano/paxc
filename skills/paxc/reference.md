@@ -46,14 +46,14 @@ rely on cross-type `==` for business logic.
 ## Statements
 
 ```
-var name: type [= expr]      # InitializeVariable action, named Initialize_<name>
-let name = expr              # Compose action, named Compose_<name>, immutable
-name = expr                  # SetVariable
-name += expr                 # IncrementVariable (int/float) or AppendToArrayVariable (array)
-name -= expr                 # DecrementVariable (int/float)
-name &= expr                 # AppendToStringVariable (string)
-pa Name                      # opaque action; body in pa/<Name>.json
-debug(expr, …)               # paxr-only diagnostic; paxc strips at compile time
+var name: type [= expr]      // InitializeVariable action, named Initialize_<name>
+let name = expr              // Compose action, named Compose_<name>, immutable
+name = expr                  // SetVariable
+name += expr                 // IncrementVariable (int/float) or AppendToArrayVariable (array)
+name -= expr                 // DecrementVariable (int/float)
+name &= expr                 // AppendToStringVariable (string)
+pa Name                      // opaque action; body in pa/<Name>.json
+debug(expr, …)               // paxr-only diagnostic; paxc strips at compile time
 terminate <status> [message] [code expr]
 ```
 
@@ -62,6 +62,10 @@ PA then supplies the type's zero value at runtime. This is the shape PA's own
 designer produces, so decoded flows typically look this way.
 
 String literals use double quotes with escape sequences `\n`, `\t`, `\"`, `\\`.
+
+`//` starts a line comment and runs to the end of the line; there is no block
+form. `#` is **not** a comment — it is a lex error, which is worth knowing
+because so many configuration languages take it.
 
 ## Expressions
 
@@ -85,9 +89,9 @@ value's `inputs`), bare function form for `if` conditions
 ### Member and subscript access
 
 ```
-obj.field              # sugar for obj?["field"] — identifier keys only
-obj?["non/ident/key"]  # subscript for non-identifier string keys
-arr?[0]                # subscript for numeric index
+obj.field              // sugar for obj?["field"] — identifier keys only
+obj?["non/ident/key"]  // subscript for non-identifier string keys
+arr?[0]                // subscript for numeric index
 ```
 
 Subscript keys must be a string literal or non-negative integer literal — no
@@ -225,9 +229,9 @@ what was set up to that point.
 ## debug()
 
 ```
-debug()                     # breadcrumb
-debug(x)                    # auto-labeled with the source slice
-debug(x, y, x - y)          # comma-separated, single line
+debug()                     // breadcrumb
+debug(x)                    // auto-labeled with the source slice
+debug(x, y, x - y)          // comma-separated, single line
 ```
 
 paxr-only. paxc strips every `debug()` at compile time (they don't participate

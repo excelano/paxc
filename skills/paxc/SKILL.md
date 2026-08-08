@@ -103,11 +103,11 @@ Both binaries take `--version` (or `-V`) and `--help` (or `-h`).
 ## Language essentials
 
 ```
-var counter: int = 0                       # → InitializeVariable action
-let region = config.region                 # → Compose action (immutable)
-counter += 1                               # → IncrementVariable
-message &= ", world"                       # → AppendToStringVariable
-tags += "urgent"                           # → AppendToArrayVariable
+var counter: int = 0                       // → InitializeVariable action
+let region = config.region                 // → Compose action (immutable)
+counter += 1                               // → IncrementVariable
+message &= ", world"                       // → AppendToStringVariable
+tags += "urgent"                           // → AppendToArrayVariable
 ```
 
 Six v1 types: `int`, `float`, `string`, `bool`, `array`, `object`. Assignment
@@ -151,10 +151,10 @@ notation (paxc rewrites them to PA's `?['field']` on emit); non-identifier keys
 (slashes, spaces, digits, numeric indexes) take the subscript form directly:
 
 ```
-let email  = triggerBody()?["body/email"]      # subscript for slashed keys
-let first  = items?[0]                         # subscript for numeric index
-let region = config.endpoints.primary          # dot chain: sugar for ?['endpoints']?['primary']
-let mix    = triggerBody()?["body/value"].name # freely mixed
+let email  = triggerBody()?["body/email"]      // subscript for slashed keys
+let first  = items?[0]                         // subscript for numeric index
+let region = config.endpoints.primary          // dot chain: sugar for ?['endpoints']?['primary']
+let mix    = triggerBody()?["body/value"].name // freely mixed
 ```
 
 Subscript keys must be a string or non-negative integer literal.
