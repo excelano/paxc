@@ -9,3 +9,4 @@ pub mod lexer;
 pub mod pa;
 pub mod parser;
 pub mod resolver;
+pub mod skill;

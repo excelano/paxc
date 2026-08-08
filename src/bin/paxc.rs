@@ -1,6 +1,6 @@
 use chumsky::prelude::*;
 use paxc::pa::{decoder, emitter, packager};
-use paxc::{diagnostic, lexer, parser, resolver};
+use paxc::{diagnostic, lexer, parser, resolver, skill};
 use std::path::{Path, PathBuf};
 use std::{env, fs, process};
 
@@ -30,7 +30,11 @@ const USAGE: &str = "usage: paxc [--target <pa-legacy>] [--name <NAME>] [--out <
      \n\
      Other flags:\n\
        --help, -h     print this help and exit\n\
-       --version, -V  print the version and exit";
+       --version, -V  print the version and exit\n\
+     \n\
+     Claude Code:\n\
+       --install-skill    install the pax skill into ~/.claude/skills/paxc\n\
+       --uninstall-skill  remove it again";
 
 /// Print usage to stderr and exit 2 — the error path for a malformed invocation.
 fn usage() -> ! {
@@ -61,6 +65,10 @@ fn parse_args() -> Args {
                 println!("paxc {}", env!("CARGO_PKG_VERSION"));
                 process::exit(0);
             }
+            // Terminal actions: they touch the user's skills directory and
+            // nothing else, so no source file is read on the way through.
+            "--install-skill" => process::exit(skill::install()),
+            "--uninstall-skill" => process::exit(skill::uninstall()),
             "--target" => {
                 i += 1;
                 let Some(v) = argv.get(i) else { usage() };

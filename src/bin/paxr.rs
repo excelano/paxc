@@ -6,7 +6,7 @@
 //! crate, sharing the lexer / parser / resolver via the library.
 
 use chumsky::prelude::*;
-use paxc::{diagnostic, interpreter, lexer, parser, resolver};
+use paxc::{diagnostic, interpreter, lexer, parser, resolver, skill};
 use std::path::Path;
 use std::{env, fs, process};
 
@@ -22,6 +22,10 @@ fn main() {
                 println!("paxr {}", env!("CARGO_PKG_VERSION"));
                 process::exit(0);
             }
+            // The skill covers both binaries, so either can install it; the
+            // idempotence check makes them interchangeable.
+            "--install-skill" => process::exit(skill::install()),
+            "--uninstall-skill" => process::exit(skill::uninstall()),
             "--verbose" | "-v" => verbose = true,
             "--quiet" | "-q" => quiet = true,
             "--debug" | "-d" => debug_only = true,
@@ -36,6 +40,7 @@ fn main() {
     }
     if positional.len() != 1 {
         eprintln!("usage: paxr [--verbose | --quiet | --debug] <file.pax>");
+        eprintln!("       paxr --install-skill   install the pax skill for Claude Code");
         process::exit(2);
     }
     let path = &positional[0];
