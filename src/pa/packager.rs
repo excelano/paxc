@@ -171,6 +171,15 @@ fn transform_for_pa(compiled: &Value) -> Value {
         if let Some(v) = old.get("triggers") {
             let mut triggers = v.clone();
             fix_manual_trigger_inputs(&mut triggers);
+            // A connector trigger (SharePoint "when an item is created",
+            // Outlook "when a new email arrives", Forms, Teams) needs the same
+            // import fixups as a connector action: the importer wants
+            // `host.connectionReferenceName`, and a trigger decoded from a real
+            // export carries an `inputs.authentication` the importer rejects.
+            // Triggers whose type is neither OpenApiConnection nor
+            // OpenApiConnectionWebhook — Recurrence, the manual Request/Button
+            // handled just above — fall through untouched.
+            fix_connector_inputs(&mut triggers);
             out.insert("triggers".to_string(), triggers);
         }
         if let Some(v) = old.get("actions") {
@@ -269,7 +278,7 @@ fn lowercase_var_types(actions: &mut Value) {
     }
 }
 
-/// Per-connector-action import fixups. PA's exporter and importer disagree
+/// Per-connector import fixups. PA's exporter and importer disagree
 /// on connector input shapes in two ways that consistently appear together:
 ///
 /// 1. `inputs.authentication: "@parameters('$authentication')"` is exported
@@ -282,7 +291,10 @@ fn lowercase_var_types(actions: &mut Value) {
 ///    `WorkflowRunActionInputsMissingProperty`.
 ///
 /// Applies to `OpenApiConnection` / `OpenApiConnectionWebhook` and recurses
-/// through container bodies to catch nested connectors.
+/// through container bodies to catch nested connectors. Run over the action
+/// map and the trigger map alike: a connector trigger needs both fixups, and
+/// every other trigger type is ignored by the same type match that ignores
+/// non-connector actions.
 fn fix_connector_inputs(actions: &mut Value) {
     let Some(obj) = actions.as_object_mut() else {
         return;
@@ -793,6 +805,76 @@ mod tests {
         assert!(host.get("connection").is_none());
         assert_eq!(host["connectionName"], "shared_office365");
         assert_eq!(host["connectionReferenceName"], "shared_office365");
+    }
+
+    #[test]
+    fn connector_trigger_gains_connection_reference_name() {
+        // Most real business flows are connector-triggered. The trigger map
+        // goes through the same fixup pass as the action map, so the importer
+        // finds the `connectionReferenceName` it requires.
+        let mut triggers = json!({
+            "When_an_item_is_created": {
+                "type": "OpenApiConnectionWebhook",
+                "inputs": {
+                    "host": {
+                        "connectionName": "shared_sharepointonline",
+                        "operationId": "OnNewItems",
+                        "apiId": "/providers/Microsoft.PowerApps/apis/shared_sharepointonline"
+                    },
+                    "parameters": { "table": "list-guid" }
+                }
+            }
+        });
+        fix_connector_inputs(&mut triggers);
+        let host = &triggers["When_an_item_is_created"]["inputs"]["host"];
+        assert_eq!(host["connectionName"], "shared_sharepointonline");
+        assert_eq!(host["connectionReferenceName"], "shared_sharepointonline");
+    }
+
+    #[test]
+    fn connector_trigger_loses_authentication() {
+        // A trigger decoded from a real export carries the authentication line
+        // PA's importer rejects with WorkflowRunActionInputsInvalidProperty.
+        let mut triggers = json!({
+            "When_a_new_email_arrives": {
+                "type": "OpenApiConnectionWebhook",
+                "inputs": {
+                    "host": { "connectionName": "shared_office365" },
+                    "authentication": "@parameters('$authentication')"
+                }
+            }
+        });
+        fix_connector_inputs(&mut triggers);
+        let inputs = &triggers["When_a_new_email_arrives"]["inputs"];
+        assert!(inputs.get("authentication").is_none());
+    }
+
+    #[test]
+    fn recurrence_trigger_is_untouched_by_connector_fixups() {
+        // The connector pass now runs over triggers, so the non-connector
+        // trigger types have to come through byte-identical.
+        let mut triggers = json!({
+            "Recurrence": {
+                "type": "Recurrence",
+                "recurrence": { "frequency": "Day", "interval": 1 }
+            }
+        });
+        let snapshot = triggers.clone();
+        fix_connector_inputs(&mut triggers);
+        assert_eq!(triggers, snapshot);
+    }
+
+    #[test]
+    fn manual_trigger_survives_both_trigger_passes() {
+        // fix_manual_trigger_inputs rewrites the manual trigger's inputs, then
+        // fix_connector_inputs runs over the same map. The Request/Button type
+        // is not a connector, so the schema block must still be there after.
+        let mut triggers = json!({
+            "manual": { "type": "Request", "kind": "Button", "inputs": {} }
+        });
+        fix_manual_trigger_inputs(&mut triggers);
+        fix_connector_inputs(&mut triggers);
+        assert_eq!(triggers["manual"]["inputs"]["schema"]["type"], "object");
     }
 
     #[test]
