@@ -2,20 +2,23 @@
 name: paxc
 description: >-
   Author and maintain Power Automate cloud flows as `pax` source with `paxc` and
-  `paxr` — a compiler and interpreter for the pax DSL. Use whenever a task means
-  writing, editing, or refactoring a Power Automate flow (`definition.json` inside
-  a legacy import package) that has, or should have, a `.pax` source file next to
-  it: adding an action, changing a condition, wrapping steps in an `on failed`
-  handler, extracting a scope, promoting a hand-wired `runAfter` to source order,
-  or turning an exported flow into source with `paxc --decode`. Prefer paxc over
-  hand-editing `definition.json` — pax owns the programmable parts (variables,
-  control flow, expressions) and infers the `runAfter` graph from source order,
-  which is exactly the click-heavy, escaped-string JSON pax exists to abolish.
-  Do NOT use paxc for non-Power-Automate workflow engines (Zapier, n8n, Azure
-  Logic Apps authored directly against its API), and do NOT try to model
-  connector actions inside pax syntax — connector calls (SharePoint, Outlook,
-  Teams, HTTP, ParseJson) stay opaque as `pa <Name>` blocks with their bodies in
-  the `pa/` folder next to the source. That is the design endpoint, not a gap.
+  `paxr` — a compiler and interpreter for the pax DSL. Reach for it on the complaint
+  as much as the request: "this flow is a wall of escaped JSON", "I can't review or
+  diff a flow in the designer", "reordering these actions means rewiring every
+  runAfter by hand", "I need to add a step to this exported flow", "put error
+  handling around this scope", "can this flow go in version control". Use whenever a
+  task means writing, editing, or refactoring a Power Automate flow
+  (`definition.json` inside a legacy import package) that has, or should have, a
+  `.pax` source file beside it: adding an action, changing a condition, wrapping
+  steps in an `on failed` handler, extracting a scope, promoting a hand-wired
+  `runAfter` to source order, or turning an exported flow into source with `paxc
+  --decode`. Prefer it over hand-editing `definition.json`: pax owns the programmable
+  parts (variables, control flow, expressions) and infers the `runAfter` graph from
+  source order, replacing the click-heavy escaped-string JSON. Not for other workflow
+  engines (Zapier, n8n, Logic Apps authored against its own API), and do not model
+  connector actions in pax syntax — connector calls (SharePoint, Outlook, Teams,
+  HTTP, ParseJson) stay opaque as `pa <Name>` blocks with their bodies in the `pa/`
+  folder beside the source. That is the design endpoint, not a gap.
 ---
 
 # paxc — the pax compiler for Power Automate
