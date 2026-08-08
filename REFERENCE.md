@@ -185,7 +185,9 @@ paxr evaluates subscripts with null-safe semantics: a missing key, an out-of-ran
 
 ### PA accessor calls
 
-paxc's function library recognizes the standard PA expression accessors so they round-trip from real flows: `triggerBody()`, `triggerOutputs()`, `trigger()`, `parameters('<name>')`, `body('<actionKey>')`, `outputs('<actionKey>')`, `actions('<actionKey>')`, `iterationIndexes('<loopKey>')`, and `item()`. They appear in pax source as ordinary call expressions and emit unchanged. paxr can simulate `iterationIndexes('<loopKey>')` (it returns the active foreach iteration counter) but for the others returns `null` with a `<skipping unknown "...">` notice — Power Automate provides the runtime data that paxr can't.
+paxc's function library recognizes the standard PA expression accessors so they round-trip from real flows: `triggerBody()`, `triggerOutputs()`, `trigger()`, `parameters("<name>")`, `body("<actionKey>")`, `outputs("<actionKey>")`, `actions("<actionKey>")`, `iterationIndexes("<loopKey>")`, and `item()`. They appear in pax source as ordinary call expressions and emit unchanged. paxr can simulate `iterationIndexes("<loopKey>")` (it returns the active foreach iteration counter) but for the others returns `null` with a `<skipping unknown "...">` notice — Power Automate provides the runtime data that paxr can't.
+
+Note the double quotes. These accessors are usually written single-quoted in Power Automate's own documentation, and that form is right inside `pa/*.json`, where the contents are PA expression syntax emitted verbatim. In pax source they are ordinary call expressions taking ordinary pax string literals, and pax strings are double-quoted, so `outputs('Compose_x')` copied out of a PA doc into a `.pax` file is a parse error.
 
 ## Control flow
 

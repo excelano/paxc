@@ -101,7 +101,17 @@ fn ceil_char_boundary(src: &str, mut idx: usize) -> usize {
 /// Convert a chumsky lex error into a diagnostic.
 pub fn from_lex_error(err: &Rich<'_, char, Span>) -> Diagnostic {
     let label = render_rich(err, |c| format!("`{c}`"), "character");
-    Diagnostic::spanned("lex error", *err.span(), label)
+    let diag = Diagnostic::spanned("lex error", *err.span(), label);
+    // A single quote is nearly always PA expression syntax pasted into pax
+    // source -- `outputs('Compose_x')` as written in PA's own documentation.
+    // The bare token complaint doesn't say which of the two languages the
+    // reader is in, so name the rule and the place the other form belongs.
+    if err.found() == Some(&'\'') {
+        return diag.with_note(
+            "pax strings are double-quoted -- try `\"...\"`. Single quotes are PA expression syntax, which belongs inside `pa/*.json`, not in pax source",
+        );
+    }
+    diag
 }
 
 /// Convert a chumsky parse error into a diagnostic.
@@ -212,6 +222,7 @@ fn join_alternatives(items: &[String]) -> String {
 mod tests {
     use super::*;
     use crate::resolver::ResolveError;
+    use chumsky::Parser as _;
 
     #[test]
     fn function_hint_fires_on_known_function_name() {
@@ -233,6 +244,40 @@ mod tests {
         };
         let diag = from_resolve_error(&err);
         assert!(diag.notes.is_empty());
+    }
+
+    #[test]
+    fn trigger_declaration_hint_gives_the_edit() {
+        let err = ResolveError::PaTriggerDeclaredAsAction {
+            name: "When_an_item_is_created".to_string(),
+            action_path: "pa/When_an_item_is_created.json".into(),
+            trigger_path: "pa/When_an_item_is_created.trigger.json".into(),
+            span: (0..0).into(),
+        };
+        let diag = from_resolve_error(&err);
+        assert_eq!(diag.notes.len(), 1);
+        assert!(diag.notes[0].contains("file-based"));
+        assert!(diag.notes[0].contains("delete the `pa When_an_item_is_created` statement"));
+    }
+
+    #[test]
+    fn single_quote_lex_error_names_the_quoting_rule() {
+        // `outputs('Compose_x')` copied out of PA's docs into pax source. The
+        // bare token complaint doesn't say which language the reader is in.
+        let src = "let a = outputs('x')";
+        let errs = crate::lexer::lexer().parse(src).into_errors();
+        let diag = from_lex_error(errs.first().expect("expected a lex error"));
+        assert_eq!(diag.notes.len(), 1, "{:?}", diag.notes);
+        assert!(diag.notes[0].contains("double-quoted"));
+        assert!(diag.notes[0].contains("pa/*.json"));
+    }
+
+    #[test]
+    fn other_lex_errors_carry_no_quoting_note() {
+        let src = "let a = 1 $ 2";
+        let errs = crate::lexer::lexer().parse(src).into_errors();
+        let diag = from_lex_error(errs.first().expect("expected a lex error"));
+        assert!(diag.notes.is_empty(), "{:?}", diag.notes);
     }
 
     #[test]

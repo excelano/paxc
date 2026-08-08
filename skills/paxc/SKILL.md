@@ -118,10 +118,16 @@ unchanged and paxr partially simulates:
 
 ```
 triggerBody()          triggerOutputs()     trigger()
-parameters('name')     body('Compose_x')    outputs('Compose_x')
-actions('Scope_foo')   iterationIndexes('For_each')
+parameters("name")     body("Compose_x")    outputs("Compose_x")
+actions("Scope_foo")   iterationIndexes("For_each")
 item()
 ```
+
+**Double quotes here.** pax source has one string literal and it is
+double-quoted; a `'` is a parse error. The single-quoted form you have seen in
+PA documentation (`outputs('Compose_x')`) is PA's own expression syntax, and it
+is correct in exactly one place: inside `pa/*.json`, where you write PA
+expressions and paxc emits them verbatim. Source is pax, files are PA.
 
 **Path expressions** use PA's safe-navigation form. Identifier keys take dot
 notation (paxc rewrites them to PA's `?['field']` on emit); non-identifier keys
