@@ -24,7 +24,7 @@ The crate ships **two binaries**: `paxc`, the compiler, and `paxr`, the interpre
 
 5. **Add the .debs to the Excelano apt repo.** Download the two `.deb`s from the release — cargo-deb names them with a package revision, `paxc_1.2.3-1_amd64.deb` — then in `~/excelano-apt/`: `add-deb.sh` each one → `rebuild.sh` (GPG-signs) → `updatesite excelano.com.apt -y`. **Dry-run the rsync first** (`rsync … --delete -n`) and confirm zero deletions before the real push — the apt pool is a superset of live, and a stray `--delete` wipe is the standing hazard. See `feedback_rsync_parent_wipes_subpath`.
 
-   `updatesite` does not touch git, so commit the apt repo right afterwards or it drifts behind what is actually being served.
+   `updatesite` is an rsync and does not touch git, but a routine package add leaves nothing to commit either — `dists/` and `pool/` are gitignored build artifacts. Commit the apt repo only when you changed something tracked: a script, `conf/release.conf`, a metapackage `control` file, or the README's curated install hint.
 
 6. **Submit the winget manifest.** winget stores one manifest per version, so every release needs its own PR; there is no update in place. Sync the fork, then run komac:
    ```sh
