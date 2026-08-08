@@ -176,9 +176,9 @@ fn transform_for_pa(compiled: &Value) -> Value {
             // import fixups as a connector action: the importer wants
             // `host.connectionReferenceName`, and a trigger decoded from a real
             // export carries an `inputs.authentication` the importer rejects.
-            // Triggers whose type is neither OpenApiConnection nor
-            // OpenApiConnectionWebhook — Recurrence, the manual Request/Button
-            // handled just above — fall through untouched.
+            // Triggers outside the `OpenApiConnection*` family — Recurrence,
+            // the manual Request/Button handled just above — fall through
+            // untouched.
             fix_connector_inputs(&mut triggers);
             out.insert("triggers".to_string(), triggers);
         }
@@ -290,11 +290,17 @@ fn lowercase_var_types(actions: &mut Value) {
 ///    different field name). Without it the importer fails with
 ///    `WorkflowRunActionInputsMissingProperty`.
 ///
-/// Applies to `OpenApiConnection` / `OpenApiConnectionWebhook` and recurses
-/// through container bodies to catch nested connectors. Run over the action
-/// map and the trigger map alike: a connector trigger needs both fixups, and
-/// every other trigger type is ignored by the same type match that ignores
-/// non-connector actions.
+/// Applies to the whole `OpenApiConnection*` family, matched by prefix rather
+/// than enumerated: PA has at least three members — `OpenApiConnection` for a
+/// plain connector call, `OpenApiConnectionWebhook` for one that registers a
+/// callback (Approvals, Forms), and `OpenApiConnectionNotification` for a
+/// push trigger (Outlook's "when a new email arrives") — and every one of them
+/// carries the same `inputs.host` connection model these two fixups act on.
+/// Enumerating the members is what let the third slip through unfixed
+/// (#19). Recurses through container bodies to catch nested connectors, and
+/// runs over the action map and the trigger map alike: a connector trigger
+/// needs both fixups, and every other trigger type is ignored by the same
+/// type test that ignores non-connector actions.
 fn fix_connector_inputs(actions: &mut Value) {
     let Some(obj) = actions.as_object_mut() else {
         return;
@@ -309,7 +315,7 @@ fn fix_connector_inputs(actions: &mut Value) {
             .unwrap_or("")
             .to_string();
         match kind.as_str() {
-            "OpenApiConnection" | "OpenApiConnectionWebhook" => {
+            k if k.starts_with("OpenApiConnection") => {
                 if let Some(inputs) = a.get_mut("inputs").and_then(|v| v.as_object_mut()) {
                     inputs.remove("authentication");
                     if let Some(host) = inputs.get_mut("host").and_then(|v| v.as_object_mut()) {
@@ -818,7 +824,7 @@ mod tests {
                 "inputs": {
                     "host": {
                         "connectionName": "shared_sharepointonline",
-                        "operationId": "OnNewItems",
+                        "operationId": "GetOnNewItems",
                         "apiId": "/providers/Microsoft.PowerApps/apis/shared_sharepointonline"
                     },
                     "parameters": { "table": "list-guid" }
@@ -847,6 +853,57 @@ mod tests {
         fix_connector_inputs(&mut triggers);
         let inputs = &triggers["When_a_new_email_arrives"]["inputs"];
         assert!(inputs.get("authentication").is_none());
+    }
+
+    #[test]
+    fn notification_trigger_gets_the_connector_fixups() {
+        // Outlook's "when a new email arrives (V3)" is neither a plain
+        // OpenApiConnection nor a Webhook but a third type, and enumerating
+        // the first two left it unfixed (#19). Shape taken from a
+        // Microsoft-published flow definition.
+        let mut triggers = json!({
+            "When_a_new_email_arrives_V3": {
+                "type": "OpenApiConnectionNotification",
+                "inputs": {
+                    "host": {
+                        "connectionName": "shared_office365",
+                        "operationId": "OnNewEmailV3",
+                        "apiId": "/providers/Microsoft.PowerApps/apis/shared_office365"
+                    },
+                    "parameters": { "importance": "Any" },
+                    "authentication": "@parameters('$authentication')"
+                },
+                "splitOn": "@triggerOutputs()?['body/value']"
+            }
+        });
+        fix_connector_inputs(&mut triggers);
+        let trigger = &triggers["When_a_new_email_arrives_V3"];
+        assert!(trigger["inputs"].get("authentication").is_none());
+        assert_eq!(
+            trigger["inputs"]["host"]["connectionReferenceName"],
+            "shared_office365"
+        );
+        // Everything outside `inputs` is the trigger's own business.
+        assert_eq!(trigger["splitOn"], "@triggerOutputs()?['body/value']");
+    }
+
+    #[test]
+    fn a_type_that_merely_contains_connection_is_not_matched() {
+        // The family test is a prefix, not a substring: `ApiConnection` is
+        // Logic Apps' own older shape, outside what paxc targets, and it must
+        // not be rewritten just because its name overlaps.
+        let mut actions = json!({
+            "Legacy": {
+                "type": "ApiConnection",
+                "inputs": {
+                    "host": { "connection": { "name": "@parameters('$connections')" } },
+                    "authentication": "@parameters('$authentication')"
+                }
+            }
+        });
+        let snapshot = actions.clone();
+        fix_connector_inputs(&mut actions);
+        assert_eq!(actions, snapshot);
     }
 
     #[test]
