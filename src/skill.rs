@@ -37,7 +37,10 @@ const SKILL: &str = "paxc";
 const FILES: &[(&str, &str)] = &[
     ("SKILL.md", include_str!("../skills/paxc/SKILL.md")),
     ("reference.md", include_str!("../skills/paxc/reference.md")),
-    ("connectors.md", include_str!("../skills/paxc/connectors.md")),
+    (
+        "connectors.md",
+        include_str!("../skills/paxc/connectors.md"),
+    ),
 ];
 
 /// The command the user actually typed, for message prefixes.
