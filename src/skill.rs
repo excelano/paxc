@@ -96,12 +96,12 @@ fn stamp(body: &str, version: &str) -> String {
          > version, the skill is stale — run `{TOOL} --install-skill` to refresh it.\n"
     );
     const FENCE: &str = "---\n";
-    if let Some(rest) = body.strip_prefix(FENCE) {
-        if let Some(i) = rest.find("\n---\n") {
-            let split = FENCE.len() + i + FENCE.len() + 1;
-            let (front, tail) = body.split_at(split);
-            return format!("{front}\n{note}{tail}");
-        }
+    if let Some(rest) = body.strip_prefix(FENCE)
+        && let Some(i) = rest.find("\n---\n")
+    {
+        let split = FENCE.len() + i + FENCE.len() + 1;
+        let (front, tail) = body.split_at(split);
+        return format!("{front}\n{note}{tail}");
     }
     // No frontmatter to sit under — still stamp it, at the top.
     format!("{note}\n{body}")

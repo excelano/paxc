@@ -2187,7 +2187,10 @@ mod tests {
         // The message names both files: what was looked for, what was found.
         let msg = err.to_string();
         assert!(msg.contains("When_an_item_is_created.json"), "{msg}");
-        assert!(msg.contains("When_an_item_is_created.trigger.json"), "{msg}");
+        assert!(
+            msg.contains("When_an_item_is_created.trigger.json"),
+            "{msg}"
+        );
     }
 
     #[test]
