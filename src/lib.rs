@@ -1,8 +1,10 @@
 //! paxc — a compiler for the pax DSL that emits Power Automate cloud flow definitions.
 //!
-//! This is the library crate. The binary entry point lives in `src/main.rs`.
+//! This is the library crate. The `paxc` and `paxr` binaries live in
+//! `src/bin/`.
 
 pub mod ast;
+pub mod cli;
 pub mod diagnostic;
 pub mod interpreter;
 pub mod lexer;

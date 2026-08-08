@@ -6,9 +6,28 @@
 //! crate, sharing the lexer / parser / resolver via the library.
 
 use chumsky::prelude::*;
-use paxc::{diagnostic, interpreter, lexer, parser, resolver, skill};
+use paxc::{cli, diagnostic, interpreter, lexer, parser, resolver, skill};
 use std::path::Path;
 use std::{env, fs, process};
+
+/// paxr's own flags. The shared tail is appended at use.
+const USAGE_HEAD: &str = "\
+usage: paxr [--verbose | --quiet | --debug] <file.pax>
+
+Runs a .pax file in-process so you can exercise the logic without going
+through Power Automate. Prints the end state of every variable unless
+told otherwise. Connector actions (`pa <Name>`) are skipped -- paxr can't
+call a real connector -- and reported as it goes.
+
+Output modes (mutually exclusive):
+  --verbose, -v  trace each action as it executes
+  --quiet, -q    print nothing but errors
+  --debug, -d    print only debug() output
+";
+
+fn usage_text() -> String {
+    format!("{USAGE_HEAD}\n{}", cli::COMMON_FLAGS)
+}
 
 fn main() {
     let argv: Vec<String> = env::args().skip(1).collect();
@@ -18,6 +37,7 @@ fn main() {
     let mut positional: Vec<String> = Vec::new();
     for arg in argv {
         match arg.as_str() {
+            "--help" | "-h" => cli::help(&usage_text()),
             "--version" | "-V" => {
                 println!("paxr {}", env!("CARGO_PKG_VERSION"));
                 process::exit(0);
@@ -39,9 +59,7 @@ fn main() {
         process::exit(2);
     }
     if positional.len() != 1 {
-        eprintln!("usage: paxr [--verbose | --quiet | --debug] <file.pax>");
-        eprintln!("       paxr --install-skill   install the pax skill for Claude Code");
-        process::exit(2);
+        cli::usage(&usage_text());
     }
     let path = &positional[0];
     let src = match fs::read_to_string(path) {

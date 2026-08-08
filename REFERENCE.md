@@ -525,7 +525,7 @@ $ paxr -q flow.pax         # quiet: suppresses all output (exit code only)
 $ paxr -d flow.pax         # debug: prints only debug() output
 ```
 
-Both binaries also accept `--version` (or `-V`) to print the installed version.
+Both binaries also accept `--version` (or `-V`) to print the installed version, and `--help` (or `-h`) to print a usage block listing the flags that binary takes.
 
 Running a flow through paxr first is a fast sanity check before making the round-trip through Power Automate.
 
