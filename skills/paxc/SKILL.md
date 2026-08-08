@@ -168,9 +168,11 @@ outputs, `@{triggerBody()}` for trigger data. The convention is for the file to
 match PA's "Peek code" output byte-for-byte — that guarantees round-trip
 fidelity.
 
-Triggers are file-based too: `pa/<Name>.trigger.json` picks the trigger
-(filename stem = trigger key, contents dropped verbatim). Without one, paxc
-emits a default manual "Button" trigger. Connection references go in
+**Do not write a `pa` statement for a trigger.** The statement form declares an
+opaque *action*; a trigger is declared by its file alone. `pa/<Name>.trigger.json`
+picks the trigger (filename stem = trigger key, contents dropped verbatim), and
+paxc finds it with nothing in the source referring to it. Without one, paxc emits
+a default manual "Button" trigger. Connection references go in
 `pa/connectionReferences.json` and end up at the top level of the emitted flow.
 
 ## Round-tripping from PA exports (`--decode`)

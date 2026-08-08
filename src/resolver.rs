@@ -294,6 +294,18 @@ pub enum ResolveError {
         path: PathBuf,
         span: Span,
     },
+    /// `pa <name>` was written for something that is a trigger: the action
+    /// body is missing but `pa/<name>.trigger.json` is sitting right beside
+    /// where it was looked for. Triggers are declared by their file alone,
+    /// never by a statement, so the fix is to delete the line. Separated from
+    /// `PaFileNotFound` because "file not found" is actively misleading here
+    /// -- the file is present, correct, and correctly named.
+    PaTriggerDeclaredAsAction {
+        name: String,
+        action_path: PathBuf,
+        trigger_path: PathBuf,
+        span: Span,
+    },
     /// `pa <name>` found the file but its contents are not valid JSON.
     PaFileInvalidJson {
         name: String,
@@ -329,6 +341,7 @@ impl ResolveError {
             | ResolveError::DuplicateHandlerTarget { span, .. }
             | ResolveError::PaSourceDirRequired { span, .. }
             | ResolveError::PaFileNotFound { span, .. }
+            | ResolveError::PaTriggerDeclaredAsAction { span, .. }
             | ResolveError::PaFileInvalidJson { span, .. } => *span,
             ResolveError::PaDirReadError { .. } | ResolveError::MultipleTriggerFiles { .. } => {
                 (0..0).into()
@@ -350,6 +363,7 @@ impl ResolveError {
             ResolveError::DuplicateHandlerTarget { .. } => "name already used",
             ResolveError::PaSourceDirRequired { .. } => "no source directory",
             ResolveError::PaFileNotFound { .. } => "file not found",
+            ResolveError::PaTriggerDeclaredAsAction { .. } => "this is a trigger",
             ResolveError::PaFileInvalidJson { .. } => "invalid JSON",
             ResolveError::PaDirReadError { .. } => "pa directory unreadable",
             ResolveError::MultipleTriggerFiles { .. } => "multiple triggers",
@@ -424,6 +438,18 @@ impl fmt::Display for ResolveError {
                     f,
                     "`pa {name}` references `{}` but that file was not found",
                     path.display()
+                )
+            }
+            ResolveError::PaTriggerDeclaredAsAction {
+                action_path,
+                trigger_path,
+                ..
+            } => {
+                write!(
+                    f,
+                    "no action body at `{}`, but `{}` exists",
+                    action_path.display(),
+                    trigger_path.display()
                 )
             }
             ResolveError::PaFileInvalidJson {
@@ -752,10 +778,26 @@ fn resolve_statements(
                     });
                 };
                 let path = dir.join("pa").join(format!("{name}.json"));
-                let bytes = std::fs::read(&path).map_err(|_| ResolveError::PaFileNotFound {
-                    name: name.clone(),
-                    path: path.clone(),
-                    span: *span,
+                let bytes = std::fs::read(&path).map_err(|_| {
+                    // A reader who has just learned `pa <Name>` + `pa/<Name>.json`
+                    // reasonably generalizes it to the trigger. When the trigger
+                    // file is what's there, say so -- "file not found" points at a
+                    // file that exists and is correctly named.
+                    let trigger_path = dir.join("pa").join(format!("{name}.trigger.json"));
+                    if trigger_path.is_file() {
+                        ResolveError::PaTriggerDeclaredAsAction {
+                            name: name.clone(),
+                            action_path: path.clone(),
+                            trigger_path,
+                            span: *span,
+                        }
+                    } else {
+                        ResolveError::PaFileNotFound {
+                            name: name.clone(),
+                            path: path.clone(),
+                            span: *span,
+                        }
+                    }
                 })?;
                 let body_json: JsonValue = serde_json::from_slice(&bytes).map_err(|err| {
                     ResolveError::PaFileInvalidJson {
@@ -2097,6 +2139,93 @@ mod tests {
         assert!(matches!(
             resolve(&prog, Some(&fixtures())).unwrap_err(),
             ResolveError::DuplicateHandlerTarget { name, .. } if name == "HTTP_Call"
+        ));
+    }
+
+    /// A throwaway source dir with its own `pa/` folder. Trigger-declaration
+    /// tests can't use `fixtures()`: dropping a `*.trigger.json` in there
+    /// would switch every other test that uses it from the default manual
+    /// trigger to a file-based one.
+    fn tmp_source_dir(label: &str) -> std::path::PathBuf {
+        let p = std::env::temp_dir().join(format!("paxc-resolver-{label}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&p);
+        std::fs::create_dir_all(p.join("pa")).unwrap();
+        p
+    }
+
+    #[test]
+    fn pa_statement_naming_a_trigger_says_so() {
+        // `pa <Name>` when pa/<Name>.trigger.json exists is the natural wrong
+        // guess: the file is present and correctly named, so "file not found"
+        // sends the reader looking for a problem that isn't there.
+        let dir = tmp_source_dir("trigger-decl");
+        std::fs::write(
+            dir.join("pa").join("When_an_item_is_created.trigger.json"),
+            r#"{"type": "OpenApiConnectionWebhook", "inputs": {}}"#,
+        )
+        .unwrap();
+        let prog = Program {
+            statements: vec![Stmt::Pa {
+                name: "When_an_item_is_created".to_string(),
+                name_span: sp(),
+                span: sp(),
+            }],
+        };
+        let err = resolve(&prog, Some(&dir)).unwrap_err();
+        let ResolveError::PaTriggerDeclaredAsAction {
+            name,
+            action_path,
+            trigger_path,
+            ..
+        } = &err
+        else {
+            panic!("expected PaTriggerDeclaredAsAction, got {err:?}");
+        };
+        assert_eq!(name, "When_an_item_is_created");
+        assert!(action_path.ends_with("When_an_item_is_created.json"));
+        assert!(trigger_path.ends_with("When_an_item_is_created.trigger.json"));
+        // The message names both files: what was looked for, what was found.
+        let msg = err.to_string();
+        assert!(msg.contains("When_an_item_is_created.json"), "{msg}");
+        assert!(msg.contains("When_an_item_is_created.trigger.json"), "{msg}");
+    }
+
+    #[test]
+    fn pa_statement_with_no_file_at_all_still_says_not_found() {
+        // The trigger-aware branch must not swallow the plain missing-file
+        // case, which stays PaFileNotFound.
+        let dir = tmp_source_dir("no-file");
+        let prog = Program {
+            statements: vec![Stmt::Pa {
+                name: "Nonexistent_thing".to_string(),
+                name_span: sp(),
+                span: sp(),
+            }],
+        };
+        assert!(matches!(
+            resolve(&prog, Some(&dir)).unwrap_err(),
+            ResolveError::PaFileNotFound { name, .. } if name == "Nonexistent_thing"
+        ));
+    }
+
+    #[test]
+    fn trigger_file_alone_resolves_without_a_pa_statement() {
+        // The other half of the same lesson: with the statement deleted, the
+        // trigger file is picked up on its own. This is what the diagnostic
+        // tells the user to do, so it needs to be true.
+        let dir = tmp_source_dir("trigger-only");
+        std::fs::write(
+            dir.join("pa").join("When_an_item_is_created.trigger.json"),
+            r#"{"type": "OpenApiConnectionWebhook", "inputs": {}}"#,
+        )
+        .unwrap();
+        let prog = Program {
+            statements: vec![var("counter")],
+        };
+        let resolved = resolve(&prog, Some(&dir)).unwrap();
+        assert!(matches!(
+            resolved.trigger,
+            ResolvedTrigger::FromFile { ref name, .. } if name == "When_an_item_is_created"
         ));
     }
 

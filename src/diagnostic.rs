@@ -135,6 +135,11 @@ pub fn from_resolve_error(err: &crate::resolver::ResolveError) -> Diagnostic {
             "`{name}` is a function -- did you mean to call it? try `{name}(...)`"
         ));
     }
+    if let crate::resolver::ResolveError::PaTriggerDeclaredAsAction { name, .. } = err {
+        return diag.with_note(format!(
+            "triggers are file-based -- delete the `pa {name}` statement and paxc picks the trigger file up on its own"
+        ));
+    }
     diag
 }
 

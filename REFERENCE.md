@@ -421,6 +421,8 @@ When pax doesn't model an action natively (which is the case for every connector
 
 Inside the JSON file you write Power Automate expression strings directly. Variables are referenced as `@{variables('name')}`, Compose outputs as `@{outputs('Compose_name')}`, and trigger data as `@{triggerBody()}`. This is the one place where you write PA expression syntax rather than pax syntax. The convention is for the file to match PA's "Code View" / "Peek code" output exactly, which makes round-trip from a real PA flow byte-identical.
 
+The statement form declares an action and only an action. A trigger is never declared in source -- it is picked up from `pa/<Name>.trigger.json` with nothing in the `.pax` file referring to it, so writing `pa When_an_item_is_created` beside a valid `pa/When_an_item_is_created.trigger.json` is an error rather than the way to wire it up. See "File-based triggers" above.
+
 pa actions participate in the runAfter chain like any other statement: they run after the preceding statement, and the next statement runs after them. The file's own `runAfter` (if it has one from PA's Peek code) is informational only -- paxc's structural sequence wins on emit. Paxr can't invoke real connectors, so when it encounters a `pa` action during interpretation it prints `<skipping pa action "Name">` and moves on.
 
 ## Connection references
