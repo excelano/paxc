@@ -1,6 +1,6 @@
 use chumsky::prelude::*;
 use paxc::pa::{decoder, emitter, packager};
-use paxc::{cli, diagnostic, lexer, parser, resolver, skill};
+use paxc::{check, cli, diagnostic, lexer, parser, resolver, skill};
 use std::path::{Path, PathBuf};
 use std::{env, fs, process};
 
@@ -10,6 +10,7 @@ struct Args {
     name: Option<String>,
     out: Option<PathBuf>,
     decode: bool,
+    check: bool,
     out_dir: Option<PathBuf>,
 }
 
@@ -29,6 +30,12 @@ or a legacy import package .zip) and writes a .pax source file plus a
 pa/ folder of opaque action bodies to <DIR>. For a .json input, --out-dir
 defaults to the input's parent directory; for a .zip, it defaults to a
 sister directory named after the zip's stem.
+
+Check mode (validate an exported flow):
+  paxc --check <flow.json|flow.zip>
+Reads a flow definition and reports problems in it without compiling or
+decoding. Works on any exported flow, including ones never written in pax.
+Exits 1 if anything is reported as an error.
 ";
 
 fn usage_text() -> String {
@@ -51,6 +58,7 @@ fn parse_args() -> Args {
     let mut name: Option<String> = None;
     let mut out: Option<PathBuf> = None;
     let mut decode = false;
+    let mut check = false;
     let mut out_dir: Option<PathBuf> = None;
     let mut positional: Vec<String> = Vec::new();
 
@@ -90,6 +98,9 @@ fn parse_args() -> Args {
             "--decode" => {
                 decode = true;
             }
+            "--check" => {
+                check = true;
+            }
             "--out-dir" => {
                 i += 1;
                 let Some(v) = argv.get(i) else { usage() };
@@ -109,12 +120,18 @@ fn parse_args() -> Args {
         name,
         out,
         decode,
+        check,
         out_dir,
     }
 }
 
 fn main() {
     let args = parse_args();
+
+    if args.check {
+        run_check(&args);
+        return;
+    }
 
     if args.decode {
         run_decode(&args);
@@ -198,6 +215,46 @@ fn main() {
                 eprintln!("note: dropped {dropped} debug() statement{plural}");
             }
         }
+    }
+}
+
+/// Check an exported flow and report what is wrong with it.
+///
+/// Exit 1 when anything is reported as an error, 0 when only warnings are,
+/// so this can gate a commit without a stylistic quibble blocking one.
+fn run_check(args: &Args) {
+    let input_path = Path::new(&args.path);
+    let input = match decoder::load_flow_json(input_path) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("paxc: cannot read {}: {e}", args.path);
+            process::exit(2);
+        }
+    };
+    let findings = match check::check_flow(&input) {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("paxc: cannot check {}: {e}", args.path);
+            process::exit(2);
+        }
+    };
+
+    if findings.is_empty() {
+        eprintln!("{}: no problems found", args.path);
+        return;
+    }
+
+    for finding in &findings {
+        println!("{finding}");
+    }
+    let errors = findings
+        .iter()
+        .filter(|f| f.severity == check::Severity::Error)
+        .count();
+    let warnings = findings.len() - errors;
+    eprintln!("{}: {errors} error(s), {warnings} warning(s)", args.path);
+    if errors > 0 {
+        process::exit(1);
     }
 }
 

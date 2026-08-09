@@ -4,6 +4,7 @@
 //! `src/bin/`.
 
 pub mod ast;
+pub mod check;
 pub mod cli;
 pub mod diagnostic;
 pub mod interpreter;

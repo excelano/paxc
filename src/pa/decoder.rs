@@ -121,6 +121,23 @@ impl std::error::Error for DecodeError {}
 /// it's a zip, the inner `Microsoft.Flow/flows/<GUID>/definition.json` is
 /// extracted in-memory and decoded as if it had been passed directly.
 pub fn decode_file(input_path: &Path, out_dir: &Path) -> Result<DecodeReport, DecodeError> {
+    let input = load_flow_json(input_path)?;
+    let basename = input_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("flow")
+        .to_string();
+    decode(&input, &basename, out_dir)
+}
+
+/// Read a flow definition from disk and parse it, accepting either a raw
+/// `definition.json` or a PA legacy import package `.zip`. Detection is by
+/// file extension, case-insensitive.
+///
+/// Split out from `decode_file` so anything that needs the definition
+/// without decoding it — `--check` being the first — gets the same zip
+/// handling rather than a second copy of it.
+pub fn load_flow_json(input_path: &Path) -> Result<Value, DecodeError> {
     let is_zip = input_path
         .extension()
         .and_then(|e| e.to_str())
@@ -133,16 +150,10 @@ pub fn decode_file(input_path: &Path, out_dir: &Path) -> Result<DecodeReport, De
             source: e,
         })?
     };
-    let input: Value = serde_json::from_slice(&bytes).map_err(|e| DecodeError::JsonParse {
+    serde_json::from_slice(&bytes).map_err(|e| DecodeError::JsonParse {
         path: input_path.to_path_buf(),
         source: e,
-    })?;
-    let basename = input_path
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("flow")
-        .to_string();
-    decode(&input, &basename, out_dir)
+    })
 }
 
 /// Locate and extract the inner `definition.json` from a PA legacy package.
