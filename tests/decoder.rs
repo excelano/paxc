@@ -72,10 +72,11 @@ fn compile_pax_to_definition(pax_path: &Path) -> Value {
 }
 
 /// Set this to let the test pass when no corpus is present at all. It exists
-/// for one caller: a CI run that could not fetch the private corpus repo,
-/// which is what happens on a pull request from a fork, since those get no
-/// secrets. Everywhere else a missing corpus is a broken checkout and should
-/// say so, which is why the skip has to be asked for rather than inferred.
+/// for one caller, `ci.yml`, where the corpus is deliberately absent: it lives
+/// in a private repo and fetching it onto a public repo's runner would cost a
+/// long-lived credential to re-run a test that already runs on the machine
+/// holding the corpus. Everywhere else a missing corpus is a broken checkout
+/// and should say so, which is why the skip is asked for rather than inferred.
 const ALLOW_MISSING_CORPUS: &str = "PAXC_ALLOW_MISSING_CORPUS";
 
 #[test]

@@ -40,44 +40,14 @@ jobs:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
 
-      # The round-trip corpus is de-identified but still lives in a private
-      # repo, so the runner has to fetch it. Token-gated the same way
-      # publish-crate.yml gates crates.io: absent means skip, not fail. A pull
-      # request from a fork gets no secrets, and refusing to test one at all
-      # would be worse than testing it without the corpus.
-      - name: Check for corpus access
-        id: corpus
-        env:
-          TOKEN: ${{ secrets.PAXC_TESTING_TOKEN }}
-        run: echo "present=${TOKEN:+true}" >> "$GITHUB_OUTPUT"
-
-      - name: Fetch the corpus
-        if: steps.corpus.outputs.present == 'true'
-        uses: actions/checkout@v6
-        with:
-          repository: excelano/paxc-testing
-          token: ${{ secrets.PAXC_TESTING_TOKEN }}
-          path: .paxc-testing
-
-      - name: Put the corpus where the harness looks
-        if: steps.corpus.outputs.present == 'true'
-        run: |
-          ln -s "$GITHUB_WORKSPACE/.paxc-testing/corpus" tests/corpus
-          echo "PAXC_CORPUS_DENYLIST=$GITHUB_WORKSPACE/.paxc-testing/denylist.txt" >> "$GITHUB_ENV"
-          echo "Round-trip corpus and denylist in place." >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Record that the corpus is missing
-        if: steps.corpus.outputs.present != 'true'
-        run: |
-          echo "PAXC_ALLOW_MISSING_CORPUS=1" >> "$GITHUB_ENV"
-          {
-            echo "### No round-trip corpus"
-            echo
-            echo "No \`PAXC_TESTING_TOKEN\` was available, so \`round_trip_corpus\`"
-            echo "was skipped and the denylist check in \`corpus_hygiene\` did not"
-            echo "run. Everything else ran. Expect this on a fork's pull request;"
-            echo "on a push to main it means the secret is missing."
-          } >> "$GITHUB_STEP_SUMMARY"
-
+      # The round-trip corpus stays off the runner. It lives in a private repo,
+      # so fetching it would mean a long-lived credential for a public repo's
+      # workflow, and the two tests that need it -- round_trip_corpus and the
+      # denylist half of corpus_hygiene -- run on the machine that has the
+      # corpus anyway. That leaves CI covering the unit tests, both emitter
+      # suites, and the corpus-independent hygiene scanners, which is the part
+      # a push can break without anybody noticing.
       - name: Test
+        env:
+          PAXC_ALLOW_MISSING_CORPUS: "1"
         run: cargo test
