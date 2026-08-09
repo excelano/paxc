@@ -230,11 +230,7 @@ fn emit_switch(
     Value::Object(out)
 }
 
-fn emit_terminate(
-    status: TerminateStatus,
-    message: Option<&Expr>,
-    code: Option<&Expr>,
-) -> Value {
+fn emit_terminate(status: TerminateStatus, message: Option<&Expr>, code: Option<&Expr>) -> Value {
     let mut inputs = Map::new();
     inputs.insert(
         "runStatus".to_string(),

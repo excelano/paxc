@@ -1137,12 +1137,10 @@ mod tests {
         // outputs(...) returns null, ?[...] of null is null, and the
         // foreach receives null. Lenient-on-null lets paxr complete the
         // run instead of erroring out on every connector-driven flow.
-        let res = run(
-            r#"var total: int = 0
+        let res = run(r#"var total: int = 0
 foreach item in outputs("Get_things")?["body/value"] {
   total += 1
-}"#,
-        );
+}"#);
         assert!(
             res.is_ok(),
             "foreach over null should skip cleanly; got {res:?}"

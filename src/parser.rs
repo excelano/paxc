@@ -436,14 +436,14 @@ where
             .or(cancelled_form)
             .labelled("terminate status (succeeded, failed, or cancelled)");
 
-        let terminate_stmt = just(Token::Terminate)
-            .ignore_then(terminate_body)
-            .map_with(|(status, message, code), e| Stmt::Terminate {
+        let terminate_stmt = just(Token::Terminate).ignore_then(terminate_body).map_with(
+            |(status, message, code), e| Stmt::Terminate {
                 status,
                 message,
                 code,
                 span: e.span(),
-            });
+            },
+        );
 
         // Case values are restricted to scalar literals (string / int / bool),
         // matching PA's constraint. Arbitrary expressions are not allowed.
