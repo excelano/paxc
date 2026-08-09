@@ -71,12 +71,38 @@ fn compile_pax_to_definition(pax_path: &Path) -> Value {
     emitter::emit(&resolved)
 }
 
+/// Set this to let the test pass when no corpus is present at all. It exists
+/// for one caller: a CI run that could not fetch the private corpus repo,
+/// which is what happens on a pull request from a fork, since those get no
+/// secrets. Everywhere else a missing corpus is a broken checkout and should
+/// say so, which is why the skip has to be asked for rather than inferred.
+const ALLOW_MISSING_CORPUS: &str = "PAXC_ALLOW_MISSING_CORPUS";
+
 #[test]
 fn round_trip_corpus() {
+    let root = corpus_root();
+    if !root.exists() {
+        assert!(
+            std::env::var_os(ALLOW_MISSING_CORPUS).is_some(),
+            "no corpus at {}. It lives in the private excelano/paxc-testing; \
+             clone or symlink it into place. Set {ALLOW_MISSING_CORPUS} to run \
+             the rest of the suite without it.",
+            root.display()
+        );
+        eprintln!(
+            "skipping round_trip_corpus: no corpus at {} and {ALLOW_MISSING_CORPUS} is set",
+            root.display()
+        );
+        return;
+    }
+
+    // A corpus that exists but holds nothing is a different problem from one
+    // that was never fetched, and no env var excuses it.
     let entries = corpus_entries();
     assert!(
         !entries.is_empty(),
-        "tests/corpus is empty; add at least one <name>/input.json"
+        "corpus at {} holds no <name>/input.json",
+        root.display()
     );
 
     let mut failed: Vec<String> = Vec::new();
