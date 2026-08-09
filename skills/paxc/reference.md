@@ -10,6 +10,7 @@ semantics, expression operators and precedence, PA accessor catalog, the
 ```
 paxc [--target pa-legacy] [--name NAME] [--out PATH] <file.pax>
 paxc --decode <flow.json | flow.zip> [--out-dir DIR]
+paxc --check <flow.json | flow.zip>
 paxc --help | --version
 paxr [--verbose | --quiet | --debug] <file.pax>
 paxr --version
@@ -22,6 +23,7 @@ paxr --version
 | `--out PATH` (paxc) | output path for `--target` mode; defaults to `<name>.zip` in the current directory |
 | `--decode` (paxc) | reverse mode: read an exported PA flow (zip or inner `definition.json`) and write `.pax` source + `pa/` folder |
 | `--out-dir DIR` (paxc, decode) | for `.json` input, defaults to the input's parent directory; for `.zip`, defaults to a sister dir named after the zip's stem |
+| `--check` (paxc) | read an exported PA flow (zip or inner `definition.json`) and report problems in it; writes nothing, exits 1 when any finding is an error |
 | `--verbose` / `-v` (paxr) | trace every action the interpreter touches (`init`, `set`, `increment`, `compose`, `condition?`, `iter[N]`, …) |
 | `--quiet` / `-q` (paxr) | suppress all output; exit code only |
 | `--debug` / `-d` (paxr) | print only `debug()` output, no state dump |
@@ -314,6 +316,48 @@ Two intentional exceptions:
 structural sequence wins on emit. This is why pasting PA "Peek code" into a
 `pa/<Name>.json` Just Works: the file's internal `runAfter` is ignored, so
 there's no need to rewrite it to match its new context.
+
+## Checking a flow (`--check`)
+
+`paxc --check` reads a flow definition and reports problems in it. It writes
+nothing, compiles nothing, and needs no `.pax` source: the input is the
+artifact PA consumes, so a flow that was never written in pax checks the same
+as one that was. It accepts an export envelope, the inner properties map, or a
+bare definition object, from either a `.json` file or a legacy `.zip`.
+
+Each finding prints as `<severity>: [<code>] <json-path>: <message>`, with an
+optional `note:` line under it. The path follows the JSON nesting, so
+`actions/Scope/actions/Get_items` and
+`actions/Send_email/inputs/parameters/emailMessage/Body` both lead straight to
+the spot. Codes are stable and greppable. Exit status is 1 if any finding is an
+error, 0 otherwise, including when there are warnings.
+
+**`runAfter` graph.** `runafter-unknown-target` (an edge naming an action that
+does not exist), `runafter-cross-scope` (naming a real action in a different
+`actions` map, which never fires — `runAfter` reaches siblings only),
+`runafter-self`, `runafter-bad-status` (not one of `Succeeded`, `Failed`,
+`Skipped`, `TimedOut`), `runafter-malformed`, `runafter-unreachable` (in or
+behind a cycle), `scope-no-entry` (no action starts the scope),
+`action-not-object`. Warning: `runafter-empty-status`, a status list that
+matches no outcome.
+
+**References and expressions.** `expr-unknown-variable` (a `variables('x')`, or
+a `SetVariable`/`AppendTo*`/`Increment` target, naming nothing an
+`InitializeVariable` declares), `expr-unknown-action` (an `outputs`, `body`,
+`actions` or `result` call naming no action or trigger), `expr-items-outside-loop`,
+`expr-unknown-parameter`, `expr-unbalanced-parens`, `expr-unterminated-string`,
+`expr-unterminated-interpolation`. Near-miss names carry a "did you mean".
+
+Name resolution folds case, because PA's expression language does not
+distinguish it. An accessor whose first argument is computed rather than a
+literal is left alone rather than guessed at.
+
+**Not checked.** Connector `operationId`s and parameter keys, so a body naming
+an operation the connector does not have still passes. Function names, because
+paxc's registry is the set it can lower rather than the set PA defines. And a
+parse failure is never reported as a malformed expression — delimiter balance
+is checked lexically instead, so valid PA that pax cannot render is not
+mistaken for a defect.
 
 ## Round-trip decoder coverage
 

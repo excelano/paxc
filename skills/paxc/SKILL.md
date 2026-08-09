@@ -12,7 +12,14 @@ description: >-
   `.pax` source file beside it: adding an action, changing a condition, wrapping
   steps in an `on failed` handler, extracting a scope, promoting a hand-wired
   `runAfter` to source order, or turning an exported flow into source with `paxc
-  --decode`. Use it just as readily when there is no flow yet and someone asks for
+  --decode`. Reach for it too when the task is to find what is wrong with a flow that
+  already exists — "this flow imported fine but a step never runs", "review this flow
+  before I import it", "why is this variable empty at run time" — because `paxc
+  --check` reads an exported `definition.json` or import package directly and reports
+  dangling `runAfter` edges, references to actions and variables that do not exist,
+  and malformed expressions, including inside the connector bodies pax itself carries
+  verbatim; that works on flows nobody ever wrote in pax. Use it just as readily when
+  there is no flow yet and someone asks for
   one in plain language -- "build me a flow that emails the owner when an item is
   added to the list", "automate this in Power Automate", "when someone submits the
   form, post it to Teams" -- because PA has no authoring API an agent can drive and
@@ -88,6 +95,8 @@ paxc flow.pax > flow.json                                  # emit PA flow defini
 paxc --target pa-legacy --name myflow --out myflow.zip flow.pax   # legacy import package (.zip)
 paxc --decode flow.zip                                     # decode a PA export → .pax + pa/
 paxc --decode definition.json --out-dir my_flow/           # decode raw inner definition
+paxc --check definition.json                               # validate a flow definition
+paxc --check flow.zip                                      # same, straight from a package
 paxr flow.pax                                              # run locally: debug + end-of-run state dump
 paxr -v flow.pax                                           # verbose trace of every action
 paxr -q flow.pax                                           # exit-code-only
@@ -99,6 +108,43 @@ Import → Import Package (Legacy)** path. Without `--target`, `paxc` writes flo
 JSON to stdout — useful for `diff`ing before and after a source edit.
 
 Both binaries take `--version` (or `-V`) and `--help` (or `-h`).
+
+## Checking a flow (`--check`)
+
+Compiling a `.pax` file validates the pax source and nothing else. The JSON
+files under `pa/` are dropped in verbatim, unopened — and most of a real flow's
+expressions live in exactly those files, in a connector's mail body or filter
+query. A wrong variable name there is not a compile error. It is an empty
+subject line at run time, and nothing in PA will tell you either.
+
+`--check` reads the other end: the `definition.json` PA actually consumes,
+whether that came out of `paxc`, out of an export, or out of somebody's editor.
+Because it works on the finished artifact, it sees inside the `pa/` bodies that
+the compiler carries past.
+
+It reports `runAfter` edges that name an action which does not exist, or which
+exists in another scope and so can never fire; cycles, and the actions stranded
+behind them; run statuses that are not run statuses; references to variables,
+actions and loop items that resolve to nothing; and unbalanced parentheses,
+quotes and `@{` interpolations. Near-miss names come back with a suggestion.
+Exit status is 1 when anything is an error and 0 when only warnings are, so it
+can gate a step in a script.
+
+Two gaps to know about, so their silence is not read as approval. Connector
+`operationId`s and parameter keys are not validated, so a body that names an
+operation the connector does not have still passes. Function names are not
+checked either. A clean run means the flow's wiring and references hold
+together, not that every connector body is right.
+
+Put it in the loop twice. Run it on what you compile, before handing over a
+package — it catches the cross-file mistakes that neither `paxc` nor `paxr` can
+see. Run it on any export before you start editing, because a flow that arrives
+with a dangling edge will still have one after your change, and you do not want
+to spend the afternoon owning somebody else's bug.
+
+```sh
+paxc requests.pax > requests.json && paxc --check requests.json
+```
 
 ## Language essentials
 
@@ -286,9 +332,11 @@ The two sides are joined by name and nothing else. `connectors.md`'s send-mail
 body reads `@variables('subject')`, and that is a live reference to the `var
 subject` above it; the same goes for `@variables('summary')` in the Teams body.
 paxc drops the file verbatim and never checks the name, so a mismatch is not a
-compile error — it is an empty subject line at run time. Any field the trigger
-already carries can be read straight from the JSON side instead, which is what
-`emailMessage/To` should be here: `"@triggerBody()?['OwnerEmail']"`.
+compile error — it is an empty subject line at run time. `paxc --check` on the
+compiled output is what catches it, and this is the mistake it exists for. Any
+field the trigger already carries can be read straight from the JSON side
+instead, which is what `emailMessage/To` should be here:
+`"@triggerBody()?['OwnerEmail']"`.
 
 Run it locally before packaging anything. `paxr requests.pax` executes the
 source with the connector calls skipped and the trigger absent, so every
@@ -299,7 +347,8 @@ the stub-and-fix pattern below.
 
 ```sh
 paxr requests.pax                     # control flow only
-paxc requests.pax | head -40          # eyeball the emitted definition
+paxc requests.pax > requests.json     # emit the definition
+paxc --check requests.json            # cross-file references, runAfter graph
 paxc --target pa-legacy --name requests --out requests.zip requests.pax
 ```
 
@@ -346,13 +395,20 @@ items" body (from PA "Peek code") into `pa/Get_pending_items.json`.
 ### Decode an existing PA export and start editing
 
 ```sh
+paxc --check MyFlow_2026.zip            # what is already wrong, before you touch it
 paxc --decode MyFlow_2026.zip           # → MyFlow_2026/definition.pax + pa/
 $EDITOR MyFlow_2026/definition.pax      # refactor: extract a scope, add an on-failed handler, etc.
+paxc MyFlow_2026/definition.pax > after.json
+paxc --check after.json                 # compare against the first run
 paxc --target pa-legacy \
   --name MyFlow_2026 \
   --out MyFlow_2026_edited.zip \
   MyFlow_2026/definition.pax            # re-emit → import through PA
 ```
+
+Checking before and after is worth the extra step. A flow that arrives with a
+broken reference still has one afterwards, and the two runs together say which
+findings you introduced and which you inherited.
 
 Fallback `pa <Name>` blocks in the decoded output are fine — they re-emit
 byte-for-byte, so a partial-native decode is still a lossless round-trip.
