@@ -10,7 +10,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use paxc::check::{self, Severity, runafter};
+use paxc::check::{self, Severity, expressions, runafter};
 use serde_json::{Map, Value};
 
 /// See the note on the same constant in `tests/decoder.rs`. CI runs without
@@ -264,6 +264,154 @@ fn waiting_across_a_scope_boundary_is_caught() {
         mutated > 0,
         "no corpus flow has a top-level action with a non-empty nested actions map"
     );
+}
+
+#[test]
+fn renaming_a_variable_breaks_every_use_of_it() {
+    let Some(entries) = corpus_or_skip("renaming_a_variable_breaks_every_use_of_it") else {
+        return;
+    };
+
+    let mut mutated = 0;
+    for entry in &entries {
+        let mut flow = load(entry);
+        let renamed = rename_all_variables(actions_mut(&mut flow));
+        if renamed == 0 {
+            continue;
+        }
+
+        // Whether the flow uses its variables at all, decided independently
+        // of the checker. One corpus flow declares `currentSignedOff` and
+        // never reads it, so a rename there is correctly silent and the test
+        // must not demand otherwise.
+        let text = serde_json::to_string(&load(entry)).expect("reserialize");
+        let uses_variables = text.to_lowercase().contains("variables('")
+            || ["SetVariable", "IncrementVariable", "DecrementVariable"]
+                .iter()
+                .chain(["AppendToArrayVariable", "AppendToStringVariable"].iter())
+                .any(|t| text.contains(t));
+        if !uses_variables {
+            continue;
+        }
+
+        let findings = check::check_flow(&flow).expect("still a checkable shape");
+        let broken = findings
+            .iter()
+            .filter(|f| f.code == expressions::UNKNOWN_VARIABLE)
+            .count();
+        assert!(
+            broken > 0,
+            "{}: renaming all {renamed} variable declarations left every use unreported",
+            label(entry)
+        );
+        mutated += 1;
+    }
+    assert!(
+        mutated > 0,
+        "no corpus flow both declares and uses a variable"
+    );
+}
+
+#[test]
+fn a_typo_in_an_action_reference_is_caught() {
+    let Some(entries) = corpus_or_skip("a_typo_in_an_action_reference_is_caught") else {
+        return;
+    };
+
+    // Retarget one accessor call by name, on the serialized flow, so the
+    // mutation is the same edit a person makes in a text editor.
+    let mut mutated = 0;
+    for entry in &entries {
+        let text = serde_json::to_string(&load(entry)).expect("reserialize");
+        let Some(start) = ["body('", "outputs('", "actions('"]
+            .iter()
+            .filter_map(|open| text.find(open).map(|i| i + open.len()))
+            .min()
+        else {
+            continue;
+        };
+        let Some(end) = text[start..].find('\'').map(|i| start + i) else {
+            continue;
+        };
+        let referenced = &text[start..end];
+        // A trailing character keeps it a plausible name rather than an
+        // obviously empty one.
+        let broken = format!("{}{}{}", &text[..end], "_typo", &text[end..]);
+        let flow: Value = serde_json::from_str(&broken).expect("still valid JSON");
+
+        let findings = check::check_flow(&flow).expect("still a checkable shape");
+        assert!(
+            codes(&findings).contains(&expressions::UNKNOWN_ACTION),
+            "{}: `{referenced}_typo` resolved to nothing and went unreported. Findings: {:?}",
+            label(entry),
+            codes(&findings)
+        );
+        mutated += 1;
+    }
+    assert!(mutated > 0, "no corpus flow references an action by name");
+}
+
+#[test]
+fn an_unclosed_paren_in_a_real_flow_is_caught() {
+    let Some(entries) = corpus_or_skip("an_unclosed_paren_in_a_real_flow_is_caught") else {
+        return;
+    };
+
+    for entry in &entries {
+        let mut flow = load(entry);
+        actions_mut(&mut flow).insert(
+            "Compose_unbalanced".to_string(),
+            serde_json::json!({
+                "type": "Compose",
+                "runAfter": {},
+                "inputs": "@concat('a', 'b'",
+            }),
+        );
+        let findings = check::check_flow(&flow).expect("still a checkable shape");
+        assert!(
+            codes(&findings).contains(&expressions::UNBALANCED_PARENS),
+            "{}: unclosed paren went unreported",
+            label(entry)
+        );
+    }
+}
+
+/// Rename every variable a flow initializes, leaving all references to them
+/// behind. Returns how many were renamed.
+fn rename_all_variables(actions: &mut Map<String, Value>) -> usize {
+    let mut renamed = 0;
+    for action in actions.values_mut() {
+        let Some(action) = action.as_object_mut() else {
+            continue;
+        };
+        if action.get("type").and_then(Value::as_str) == Some("InitializeVariable") {
+            let declared = action
+                .get_mut("inputs")
+                .and_then(|i| i.get_mut("variables"))
+                .and_then(Value::as_array_mut);
+            for var in declared.into_iter().flatten() {
+                if let Some(name) = var.get("name").and_then(Value::as_str) {
+                    var["name"] = Value::String(format!("{name}_renamed"));
+                    renamed += 1;
+                }
+            }
+        }
+        // Recurse into whichever container shape this action uses.
+        for key in ["actions", "else", "default"] {
+            let nested = match key {
+                "actions" => action.get_mut(key).and_then(Value::as_object_mut),
+                _ => action
+                    .get_mut(key)
+                    .and_then(Value::as_object_mut)
+                    .and_then(|b| b.get_mut("actions"))
+                    .and_then(Value::as_object_mut),
+            };
+            if let Some(nested) = nested {
+                renamed += rename_all_variables(nested);
+            }
+        }
+    }
+    renamed
 }
 
 /// First top-level action carrying a non-empty nested `actions` map, with

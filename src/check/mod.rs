@@ -11,13 +11,13 @@
 //!
 //! Findings are not `diagnostic::Diagnostic`. That type is built around byte
 //! spans into pax source text, and there is no pax source here. A finding
-//! points at a JSON location instead: the containing `actions` map and the
-//! action name within it.
+//! carries a JSON path instead.
 
 use std::fmt;
 
 use serde_json::{Map, Value};
 
+pub mod expressions;
 pub mod runafter;
 
 /// Whether a finding describes a flow that is broken or one that is
@@ -41,32 +41,27 @@ impl fmt::Display for Severity {
 
 /// One problem found in a flow definition.
 ///
-/// `scope` is the path to the containing `actions` map, written the way the
-/// JSON nests (`actions/Scope/actions`), so it can be followed by hand in an
-/// editor. `code` is stable and machine-greppable; `message` is for a human
-/// and `note` carries the reason it matters when that isn't self-evident.
+/// `path` locates it the way the JSON nests, so it can be followed by hand
+/// in an editor: `actions/Scope/actions/Get_attachments` for a whole action,
+/// or `actions/Send_an_email/inputs/parameters/emailMessage/Body` for one
+/// field inside one. `code` is stable and machine-greppable; `message` is
+/// for a human and `note` carries the reason it matters when that isn't
+/// self-evident.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Finding {
     pub severity: Severity,
     pub code: &'static str,
-    pub scope: String,
-    pub action: String,
+    pub path: String,
     pub message: String,
     pub note: Option<String>,
 }
 
 impl Finding {
-    pub fn error(
-        code: &'static str,
-        scope: &str,
-        action: &str,
-        message: impl Into<String>,
-    ) -> Self {
+    pub fn error(code: &'static str, path: impl Into<String>, message: impl Into<String>) -> Self {
         Self {
             severity: Severity::Error,
             code,
-            scope: scope.to_string(),
-            action: action.to_string(),
+            path: path.into(),
             message: message.into(),
             note: None,
         }
@@ -74,15 +69,13 @@ impl Finding {
 
     pub fn warning(
         code: &'static str,
-        scope: &str,
-        action: &str,
+        path: impl Into<String>,
         message: impl Into<String>,
     ) -> Self {
         Self {
             severity: Severity::Warning,
             code,
-            scope: scope.to_string(),
-            action: action.to_string(),
+            path: path.into(),
             message: message.into(),
             note: None,
         }
@@ -95,13 +88,8 @@ impl Finding {
 
     /// Sort key, so a run over the same file always reports in the same
     /// order and two runs can be diffed.
-    fn sort_key(&self) -> (std::cmp::Reverse<Severity>, &str, &str, &str) {
-        (
-            std::cmp::Reverse(self.severity),
-            &self.scope,
-            &self.action,
-            self.code,
-        )
+    fn sort_key(&self) -> (std::cmp::Reverse<Severity>, &str, &str) {
+        (std::cmp::Reverse(self.severity), &self.path, self.code)
     }
 }
 
@@ -109,8 +97,8 @@ impl fmt::Display for Finding {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "{}: [{}] {}/{}: {}",
-            self.severity, self.code, self.scope, self.action, self.message
+            "{}: [{}] {}: {}",
+            self.severity, self.code, self.path, self.message
         )?;
         if let Some(note) = &self.note {
             write!(f, "\n    note: {note}")?;
@@ -144,15 +132,27 @@ impl std::error::Error for CheckError {}
 /// pointed at whatever file the user has to hand, so all three are accepted
 /// rather than making them guess which layer is wanted.
 pub fn check_flow(input: &Value) -> Result<Vec<Finding>, CheckError> {
-    let actions = locate_actions(input)?;
+    let definition = locate_definition(input)?;
+    let actions = definition
+        .get("actions")
+        .and_then(Value::as_object)
+        .expect("locate_definition only returns a map that has one");
+
     let mut findings = runafter::check(actions);
+    findings.extend(expressions::check(definition));
     findings.sort_by(|a, b| a.sort_key().cmp(&b.sort_key()));
+    // One expression can name the same missing thing twice --
+    // `union(variables('x'), variables('x'))` is real corpus shape -- and
+    // reporting it twice at one path reads as a bug in the checker rather
+    // than two problems to fix.
+    findings.dedup_by(|a, b| a.code == b.code && a.path == b.path && a.message == b.message);
     Ok(findings)
 }
 
-/// Peel whichever wrappers are present and return the top-level `actions`
-/// map.
-fn locate_actions(input: &Value) -> Result<&Map<String, Value>, CheckError> {
+/// Peel whichever wrappers are present and return the definition object —
+/// the level holding `actions`, and also `triggers` and `parameters`, both
+/// of which the expression checks resolve references against.
+fn locate_definition(input: &Value) -> Result<&Map<String, Value>, CheckError> {
     let obj = input
         .as_object()
         .ok_or_else(|| CheckError::BadShape("input JSON is not an object".to_string()))?;
@@ -165,16 +165,18 @@ fn locate_actions(input: &Value) -> Result<&Map<String, Value>, CheckError> {
         .and_then(Value::as_object)
         .unwrap_or(obj);
 
-    definition
+    if definition
         .get("actions")
         .and_then(Value::as_object)
-        .ok_or_else(|| {
-            CheckError::BadShape(
-                "no `actions` map found — expected an export envelope, a properties map, or a \
-                 definition object"
-                    .to_string(),
-            )
-        })
+        .is_none()
+    {
+        return Err(CheckError::BadShape(
+            "no `actions` map found — expected an export envelope, a properties map, or a \
+             definition object"
+                .to_string(),
+        ));
+    }
+    Ok(definition)
 }
 
 #[cfg(test)]
@@ -212,8 +214,8 @@ mod tests {
     #[test]
     fn errors_sort_before_warnings() {
         let mut fs = [
-            Finding::warning("w", "actions", "B", "later"),
-            Finding::error("e", "actions", "A", "first"),
+            Finding::warning("w", "actions/B", "later"),
+            Finding::error("e", "actions/A", "first"),
         ];
         fs.sort_by(|a, b| a.sort_key().cmp(&b.sort_key()));
         assert_eq!(fs[0].severity, Severity::Error);

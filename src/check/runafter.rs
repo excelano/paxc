@@ -49,6 +49,14 @@ struct Scope<'a> {
     actions: &'a Map<String, Value>,
 }
 
+impl Scope<'_> {
+    /// JSON path to one action within this scope, which is where a finding
+    /// about that action points.
+    fn at(&self, name: &str) -> String {
+        format!("{}/{}", self.path, name)
+    }
+}
+
 /// Check every `actions` map reachable from `root`.
 pub fn check(root: &Map<String, Value>) -> Vec<Finding> {
     let mut scopes = Vec::new();
@@ -133,8 +141,7 @@ fn check_scope(scope: &Scope<'_>, index: &HashMap<&str, &str>, out: &mut Vec<Fin
         let Some(action) = action.as_object() else {
             out.push(Finding::error(
                 NOT_OBJECT,
-                &scope.path,
-                name,
+                scope.at(name),
                 "action is not a JSON object",
             ));
             continue;
@@ -160,8 +167,7 @@ fn check_scope(scope: &Scope<'_>, index: &HashMap<&str, &str>, out: &mut Vec<Fin
                 edge_errors = true;
                 out.push(Finding::error(
                     MALFORMED,
-                    &scope.path,
-                    name,
+                    scope.at(name),
                     format!(
                         "`runAfter` is {}, expected an object mapping action names to status lists",
                         type_name(other)
@@ -180,8 +186,7 @@ fn check_scope(scope: &Scope<'_>, index: &HashMap<&str, &str>, out: &mut Vec<Fin
                 out.push(
                     Finding::error(
                         SELF_REFERENCE,
-                        &scope.path,
-                        name,
+                        scope.at(name),
                         "waits on itself, so it can never run",
                     )
                     .with_note("remove the self-reference, or point it at the action that should precede this one"),
@@ -197,8 +202,7 @@ fn check_scope(scope: &Scope<'_>, index: &HashMap<&str, &str>, out: &mut Vec<Fin
                 Some(other_scope) => out.push(
                     Finding::error(
                         CROSS_SCOPE,
-                        &scope.path,
-                        name,
+                        scope.at(name),
                         format!("waits on `{target}`, which is not a sibling"),
                     )
                     .with_note(format!(
@@ -209,8 +213,7 @@ fn check_scope(scope: &Scope<'_>, index: &HashMap<&str, &str>, out: &mut Vec<Fin
                 None => out.push(
                     Finding::error(
                         UNKNOWN_TARGET,
-                        &scope.path,
-                        name,
+                        scope.at(name),
                         format!("waits on `{target}`, which does not exist in this flow"),
                     )
                     .with_note(
@@ -240,8 +243,7 @@ fn check_scope(scope: &Scope<'_>, index: &HashMap<&str, &str>, out: &mut Vec<Fin
         out.push(
             Finding::error(
                 NO_ENTRY,
-                &scope.path,
-                first,
+                scope.at(first),
                 "no action in this scope starts it — every action waits on another",
             )
             .with_note(
@@ -303,8 +305,7 @@ fn report_unreachable(scope: &Scope<'_>, deps: &BTreeMap<&str, Vec<&str>>, out: 
         out.push(
             Finding::error(
                 UNREACHABLE,
-                &scope.path,
-                name,
+                scope.at(name),
                 format!("can never run; it waits on {}", quoted_list(&blocked)),
             )
             .with_note(
@@ -329,8 +330,7 @@ fn check_statuses(
     let Some(list) = statuses.as_array() else {
         out.push(Finding::error(
             MALFORMED,
-            &scope.path,
-            name,
+            scope.at(name),
             format!(
                 "status list for `{target}` is {}, expected an array",
                 type_name(statuses)
@@ -343,8 +343,7 @@ fn check_statuses(
         out.push(
             Finding::warning(
                 EMPTY_STATUS,
-                &scope.path,
-                name,
+                scope.at(name),
                 format!("accepts no outcome from `{target}`, so it never runs"),
             )
             .with_note(
@@ -360,16 +359,14 @@ fn check_statuses(
             Some(s) => out.push(
                 Finding::error(
                     BAD_STATUS,
-                    &scope.path,
-                    name,
+                    scope.at(name),
                     format!("`{s}` is not a run status"),
                 )
                 .with_note(format!("expected one of {}", VALID_STATUSES.join(", "))),
             ),
             None => out.push(Finding::error(
                 BAD_STATUS,
-                &scope.path,
-                name,
+                scope.at(name),
                 format!(
                     "status list for `{target}` holds {}, expected strings",
                     type_name(status)
@@ -430,7 +427,7 @@ mod tests {
             "B": {"type": "Compose", "runAfter": {"Typo": ["Succeeded"]}},
         }));
         assert_eq!(codes(&f), vec![UNKNOWN_TARGET]);
-        assert_eq!(f[0].action, "B");
+        assert_eq!(f[0].path, "actions/B");
     }
 
     #[test]
@@ -470,7 +467,7 @@ mod tests {
                 "else": {"actions": {"E": {"type": "Compose", "runAfter": {"Nope": ["Succeeded"]}}}}},
         }));
         assert_eq!(codes(&f), vec![UNKNOWN_TARGET]);
-        assert_eq!(f[0].scope, "actions/If/else/actions");
+        assert_eq!(f[0].path, "actions/If/else/actions/E");
     }
 
     #[test]
@@ -483,9 +480,9 @@ mod tests {
                     "D": {"type": "Compose", "runAfter": {"Ghost": ["Succeeded"]}}}}},
         }));
         assert_eq!(f.len(), 2);
-        let scopes: Vec<&str> = f.iter().map(|f| f.scope.as_str()).collect();
-        assert!(scopes.contains(&"actions/Switch/cases/Case1/actions"));
-        assert!(scopes.contains(&"actions/Switch/default/actions"));
+        let scopes: Vec<&str> = f.iter().map(|f| f.path.as_str()).collect();
+        assert!(scopes.contains(&"actions/Switch/cases/Case1/actions/C"));
+        assert!(scopes.contains(&"actions/Switch/default/actions/D"));
     }
 
     #[test]
