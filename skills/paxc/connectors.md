@@ -89,6 +89,43 @@ binding is the one step of the loop a human has to perform, and it is where it
 belongs: consent for an agent's flow to send mail as someone is a decision for
 the someone.
 
+## Triggers that can retrigger themselves
+
+**Read this before pairing any trigger on this page with a write action.** A
+flow that fires on a change and then makes the same kind of change feeds itself,
+and neither paxc nor Power Automate will stop it. The two worst pairings are
+both spelled out below, and both are on this page.
+
+**SharePoint is the dangerous one.** `GetOnUpdatedItems` plus `PatchItem`
+against the same list is a self-feeding loop: every update the flow writes is an
+update the trigger fires on. There is nothing to see while it happens — the flow
+simply runs, and keeps running, against the API limits of whoever owns the
+connection. `GetOnNewItems` plus `PostItem` on one list is the same fault in a
+milder form. Write to a different list than the one that triggers, or gate the
+write behind a condition the write itself makes false: set a `Status` the
+condition excludes, so a second pass cannot qualify.
+
+**Mail is the visible one.** `subjectFilter` is a substring match, so a reply
+whose subject contains the filter string satisfies the filter that produced it.
+Keep the outgoing subject clear of the trigger's token, which also means never
+echoing the incoming subject into the outgoing one — put it in the body, where
+it cannot match.
+
+**Then add a second guard in pax**, independent of the first, so that a later
+edit to the trigger cannot reopen the loop on its own:
+
+```
+let subject = triggerBody()?["subject"]
+
+if !contains(subject, "the-flow's-own-mark") {
+  pa Send_summary
+}
+```
+
+The two defences are deliberately different in kind. The first keeps the flow's
+output from matching its own trigger; the second refuses to act even if it does.
+Either alone is one edit away from a loop.
+
 ## Placeholders
 
 `<SITE>` is a full site URL, `https://contoso.sharepoint.com/sites/Operations`.
@@ -125,7 +162,9 @@ link. Anything else in angle brackets is a plain value the user supplies.
 This one polls, so it carries its own `recurrence`, and `splitOn` is what makes
 the flow run once per new item rather than once per batch. Swap `GetOnNewItems`
 for `GetOnUpdatedItems` to fire on creation *and* every later edit; the
-parameters and the rest of the envelope are identical.
+parameters and the rest of the envelope are identical. If the flow also writes
+to this list, read "Triggers that can retrigger themselves" above first —
+`GetOnUpdatedItems` with `PatchItem` on one list is a loop.
 
 Inside the flow, the item is `triggerBody()` — a single item, because `splitOn`
 already unwrapped the batch.
@@ -291,6 +330,8 @@ or write the text columns first and add the awkward one once its key is known.
 
 Note the type: this is the push variant, not `OpenApiConnection`. `subjectFilter`
 and `from` narrow it further, and `fetchOnlyUnread` is available too.
+`subjectFilter` is a substring match, so if the flow also sends mail, read
+"Triggers that can retrigger themselves" above before choosing the token.
 
 ### Send an email (V2)
 
