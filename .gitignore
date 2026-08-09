@@ -1,9 +1,12 @@
 /target
 *.zip
 
-# Round-trip test corpus: real PA flow exports from tenants. NEVER commit
-# -- the JSON contains tenant identifiers, user IDs, SharePoint URLs, and
-# internal flow names. The test harness in tests/decoder.rs reads this
-# directory via glob; if empty, the corpus test passes vacuously, so the
-# harness keeps working with or without local fixtures.
-tests/corpus/
+# Round-trip test corpus: PA flow exports, which carry tenant identifiers,
+# user IDs, SharePoint URLs and internal flow names until they are scrubbed.
+# NEVER commit, scrubbed or not -- the corpus lives in the private
+# excelano/paxc-testing and arrives here as a clone or a symlink.
+#
+# No trailing slash, deliberately. A pattern ending in `/` matches only a
+# real directory, and this is a symlink on the machine it is developed on,
+# so the slashed form silently stopped covering it.
+tests/corpus

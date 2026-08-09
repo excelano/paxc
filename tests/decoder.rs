@@ -8,10 +8,16 @@
 //!      structural / semantic equivalence (see `compare_definitions` for
 //!      exactly what's compared and what's intentionally tolerated).
 //!
-//! Adding a new flow to the corpus is just dropping a `definition.json` at
-//! `tests/corpus/<descriptive-name>/input.json` — no per-flow code needed.
-//! The harness fails loudly with the first divergence so regressions are
-//! easy to triage.
+//!   4. Checks the decoder's own notes against a recorded snapshot, which is
+//!      the only part of this that can see a lowering regression: an action
+//!      that stops being lowered still round-trips, as a `pa` block.
+//!
+//! Adding a new flow to the corpus is dropping a `definition.json` at
+//! `tests/corpus/<descriptive-name>/input.json` and then running the harness
+//! twice — the first run records `decode-notes.txt` and fails, so the list of
+//! actions the decoder gave up on gets read by a person before it becomes the
+//! baseline. The harness reports every divergence it found rather than the
+//! first, so one run triages a whole corpus.
 
 use chumsky::prelude::*;
 use paxc::pa::{decoder, emitter};
@@ -81,13 +87,17 @@ fn round_trip_corpus() {
         let original: Value = serde_json::from_slice(&original_bytes).expect("parse corpus input");
 
         let out_dir = tmp_dir(&label);
-        let _report = match decoder::decode_file(&input_path, &out_dir) {
+        let report = match decoder::decode_file(&input_path, &out_dir) {
             Ok(r) => r,
             Err(e) => {
                 failed.push(format!("{label}: decode failed: {e}"));
                 continue;
             }
         };
+
+        if let Err(diff) = check_decode_notes(&entry, &report.warnings) {
+            failed.push(format!("{label}: {diff}"));
+        }
 
         // The decoded pax file is named after the input stem ("input.pax").
         let pax_path = out_dir.join("input.pax");
@@ -105,6 +115,73 @@ fn round_trip_corpus() {
             failed.join("\n")
         );
     }
+}
+
+/// Snapshot of what the decoder said while reading a corpus flow, chiefly its
+/// record of every action it declined to lower natively and why.
+///
+/// The round-trip comparison cannot see this. An action that stops being
+/// lowered falls back to a `pa` block, which re-emits verbatim and keeps the
+/// same type, so a decoder that quietly gives up on lowering altogether still
+/// round-trips perfectly. That is the opposite of what the corpus is for. The
+/// notes are the decoder's own account of the judgement, and pinning them
+/// turns a silent loss into a diff somebody has to approve.
+///
+/// A flow with no file yet gets one written from the current run and fails
+/// once, so a new corpus entry cannot skip the check by omission. Regenerate
+/// all of them deliberately with `PAXC_UPDATE_DECODE_NOTES=1 cargo test`.
+const DECODE_NOTES_FILE: &str = "decode-notes.txt";
+
+fn check_decode_notes(entry: &Path, warnings: &[String]) -> Result<(), String> {
+    let path = entry.join(DECODE_NOTES_FILE);
+    let actual = warnings.join("\n");
+    let write = |text: &str| {
+        let body = if text.is_empty() {
+            String::new()
+        } else {
+            format!("{text}\n")
+        };
+        fs::write(&path, body).map_err(|e| format!("writing {}: {e}", path.display()))
+    };
+
+    if std::env::var_os("PAXC_UPDATE_DECODE_NOTES").is_some() {
+        return write(&actual);
+    }
+
+    let expected = match fs::read_to_string(&path) {
+        Ok(s) => s.trim_end().to_string(),
+        Err(_) => {
+            write(&actual)?;
+            return Err(format!(
+                "no {DECODE_NOTES_FILE} yet, so one was written from this run. Read it, \
+                 confirm every fallback in it is one you meant, and re-run."
+            ));
+        }
+    };
+    if expected == actual {
+        return Ok(());
+    }
+
+    let before: Vec<&str> = expected.lines().collect();
+    let after: Vec<&str> = actual.lines().collect();
+    let mut lines = Vec::new();
+    for line in &after {
+        if !before.contains(line) {
+            lines.push(format!("  new:  {line}"));
+        }
+    }
+    for line in &before {
+        if !after.contains(line) {
+            lines.push(format!("  gone: {line}"));
+        }
+    }
+    Err(format!(
+        "decode notes changed ({} recorded, {} now). If the change is intended, \
+         regenerate with PAXC_UPDATE_DECODE_NOTES=1.\n{}",
+        before.len(),
+        after.len(),
+        lines.join("\n")
+    ))
 }
 
 /// Compare original PA export JSON against paxc's re-emitted JSON. Structural
@@ -133,6 +210,12 @@ fn round_trip_corpus() {
 ///   resulting key is documented as a known divergence in the slice-44a plan
 ///   and tolerated here at the "actions are present and have the right
 ///   types" level rather than exact key equality.
+///
+/// Everything below the top level counts. A PA action name is unique across
+/// the whole workflow — `runAfter` and `body('X')` both address by bare name
+/// — so both sides are flattened into one key-to-body map before comparison
+/// and depth stops mattering. Without that, a flow whose work sits inside a
+/// Scope is checked at the level of "there is a Scope" and nothing else.
 fn compare_definitions(original: &Value, reemitted: &Value) -> Result<(), String> {
     let orig_def = strip_definition(original)?;
     let new_def = strip_definition(reemitted)?;
@@ -162,12 +245,30 @@ fn compare_definitions(original: &Value, reemitted: &Value) -> Result<(), String
         .ok_or("reemitted has no actions")?;
 
     // Counts by type at the top level — looser than exact key equality but
-    // enough to catch dropped or duplicated actions.
-    let orig_types = action_type_counts(orig_actions);
-    let new_types = action_type_counts(new_actions);
+    // enough to catch dropped or duplicated actions. Checked before the
+    // flattened count so a top-level loss names itself instead of arriving
+    // as one number off in a corpus-wide tally.
+    let orig_types = action_type_counts(&flatten_one_level(orig_actions));
+    let new_types = action_type_counts(&flatten_one_level(new_actions));
     if orig_types != new_types {
         return Err(format!(
             "top-level action type counts differ\noriginal: {orig_types:?}\nreemitted: {new_types:?}"
+        ));
+    }
+
+    // The same count over every action at every depth. A container's own key
+    // is regenerated by native lowering, so its children cannot be addressed
+    // by path; they are addressed by name, which PA guarantees is unique
+    // across the workflow.
+    let orig_all = flatten_actions(orig_actions);
+    let new_all = flatten_actions(new_actions);
+    let orig_all_types = action_type_counts(&orig_all);
+    let new_all_types = action_type_counts(&new_all);
+    if orig_all_types != new_all_types {
+        return Err(format!(
+            "action type counts differ at some depth ({} original actions, {} reemitted)\noriginal: {orig_all_types:?}\nreemitted: {new_all_types:?}",
+            orig_all.len(),
+            new_all.len()
         ));
     }
 
@@ -199,7 +300,7 @@ fn compare_definitions(original: &Value, reemitted: &Value) -> Result<(), String
     .into_iter()
     .collect();
 
-    for (key, orig_body) in orig_actions {
+    for (key, orig_body) in &orig_all {
         let orig_type = orig_body.get("type").and_then(Value::as_str).unwrap_or("");
         if native_types.contains(orig_type) {
             // Native-lowering case is harder to compare directly because the
@@ -208,17 +309,23 @@ fn compare_definitions(original: &Value, reemitted: &Value) -> Result<(), String
             // the type-count check above catches gross mismatches.
             continue;
         }
-        // Fall-back actions: must appear in reemitted under the same (or
-        // normalized) key. Normalization mirrors decoder::normalize_action_key.
-        let normalized = normalize_for_lookup(key);
-        let candidate = new_actions
-            .get(key)
-            .or_else(|| new_actions.get(&normalized));
-        let reemit_body = match candidate {
+        // Fall-back actions: must appear in reemitted under the original key,
+        // exactly. A key the decoder had to sanitise for pax is restored from
+        // `pa/flow.json.actionNameMap` on the way back out, so accepting the
+        // sanitised spelling here would be accepting the map's loss.
+        let reemit_body = match new_all.get(key) {
             Some(b) => b,
             None => {
+                let near = normalize_for_lookup(key);
+                let hint = if new_all.contains_key(&near) {
+                    format!(
+                        " (found `{near}` instead — the sanitised spelling, so actionNameMap did not restore it)"
+                    )
+                } else {
+                    String::new()
+                };
                 return Err(format!(
-                    "action `{key}` (type {orig_type}) missing from reemitted definition"
+                    "action `{key}` (type {orig_type}) missing from reemitted definition{hint}"
                 ));
             }
         };
@@ -275,7 +382,7 @@ fn strip_run_after(v: &Value) -> Value {
 }
 
 fn action_type_counts(
-    actions: &serde_json::Map<String, Value>,
+    actions: &std::collections::BTreeMap<String, Value>,
 ) -> std::collections::BTreeMap<String, usize> {
     let mut counts = std::collections::BTreeMap::new();
     for body in actions.values() {
@@ -287,6 +394,69 @@ fn action_type_counts(
         *counts.entry(t).or_insert(0) += 1;
     }
     counts
+}
+
+/// The top-level actions as a plain map, so the shallow and the deep count
+/// go through the same code and any difference between them is depth alone.
+fn flatten_one_level(
+    actions: &serde_json::Map<String, Value>,
+) -> std::collections::BTreeMap<String, Value> {
+    actions
+        .iter()
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect()
+}
+
+/// Every action in the definition, at every depth, keyed by name. PA requires
+/// action names to be unique across a whole workflow, so flattening loses
+/// nothing that the comparison needs and gains the ability to address a
+/// nested action whose parent's key was regenerated.
+fn flatten_actions(
+    actions: &serde_json::Map<String, Value>,
+) -> std::collections::BTreeMap<String, Value> {
+    let mut out = std::collections::BTreeMap::new();
+    collect_actions(actions, &mut out);
+    out
+}
+
+fn collect_actions(
+    actions: &serde_json::Map<String, Value>,
+    out: &mut std::collections::BTreeMap<String, Value>,
+) {
+    for (key, body) in actions {
+        out.insert(key.clone(), body.clone());
+        for nested in nested_action_blocks(body) {
+            collect_actions(nested, out);
+        }
+    }
+}
+
+/// The four places a Logic Apps action can hold child actions: the `actions`
+/// map of a Scope / Foreach / Until / If-then, the `else` branch of an If,
+/// and a Switch's `cases` and `default`.
+fn nested_action_blocks(body: &Value) -> Vec<&serde_json::Map<String, Value>> {
+    let mut blocks = Vec::new();
+    for path in [
+        vec!["actions"],
+        vec!["else", "actions"],
+        vec!["default", "actions"],
+    ] {
+        let mut here = Some(body);
+        for step in path {
+            here = here.and_then(|v| v.get(step));
+        }
+        if let Some(m) = here.and_then(Value::as_object) {
+            blocks.push(m);
+        }
+    }
+    if let Some(cases) = body.get("cases").and_then(Value::as_object) {
+        for case in cases.values() {
+            if let Some(m) = case.get("actions").and_then(Value::as_object) {
+                blocks.push(m);
+            }
+        }
+    }
+    blocks
 }
 
 /// Mirror of `decoder::normalize_action_key`'s base normalization (for the
