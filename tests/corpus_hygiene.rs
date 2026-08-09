@@ -20,14 +20,20 @@
 //!
 //! ## What these tests can and cannot prove
 //!
-//! They prove the absence of the four things a machine can recognise on sight:
-//! hostnames, email addresses, GUIDs, and undashed hex identifiers of the kind
-//! Forms gives its questions. They cannot prove the absence
+//! They prove the absence of the five things a machine can recognise on sight:
+//! hostnames, email addresses, GUIDs, the undashed hex identifiers Forms gives
+//! its questions, and the base64 identifiers SharePoint and OneDrive give
+//! drives and items. They cannot prove the absence
 //! of business vocabulary -- a list named after a client project, a column
 //! named after an internal process -- because there is no pattern that
 //! separates that from any other string. Renaming it is a judgement call made
 //! by a reader, recorded in the testing repo's README, and not enforceable
 //! here.
+//!
+//! Each of the five started as a class somebody noticed, and the last two were
+//! noticed only by reading the corpus after the first three passed. A guard
+//! that has never been shown the thing it is meant to catch is a guess; run a
+//! new class of file past all five before trusting them on it.
 //!
 //! `corpus_avoids_the_configured_denylist` closes part of that gap without
 //! naming anyone in a committed file: point `PAXC_CORPUS_DENYLIST` at a local
@@ -78,6 +84,18 @@ const SYNTHETIC_HEX_PREFIX: &str = "0000000000000000000000000000";
 /// Shortest identifier the undashed check considers. Below this, hex runs are
 /// ordinary content: colour codes, a truncated hash, a version fragment.
 const HEX_ID_MIN_LEN: usize = 32;
+
+/// And the same idea again for identifiers that are not hex at all.
+///
+/// SharePoint writes a drive id as `b!` and 64 base64url characters, OneDrive
+/// writes an item id as `01` and 32 base32 ones, and a Forms form id runs to
+/// ninety. Every one of them encodes a site or list GUID, so every one is
+/// tenant data, and none matches either of the checks above. The scrub mints
+/// replacements starting with this prefix.
+const SYNTHETIC_OPAQUE_PREFIX: &str = "0000";
+
+/// Shortest run the opaque check considers.
+const OPAQUE_ID_MIN_LEN: usize = 32;
 
 fn corpus_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/corpus")
@@ -214,6 +232,42 @@ fn hex_identifiers(text: &str) -> Vec<String> {
     found
 }
 
+/// Every run of at least `OPAQUE_ID_MIN_LEN` base64url characters that could be
+/// an encoded identifier.
+///
+/// Synthetic GUIDs are blanked first, because a connection name reads
+/// `shared-sharepointonl-<guid>` and would otherwise present as one 56
+/// character run that no rule below could explain.
+///
+/// Underscores split a run, so an action key like
+/// `if_Operations_OR_Operations_Leadership` is several short tokens rather than
+/// one long one. What is left has to look like an identifier and not like the
+/// two other things of that length and character class: a hostname such as
+/// `flow-apim-unitedstates-002-westus-01`, which has no upper case, and a
+/// schema field name such as `isProcessSimpleApiReferenceConversionAlreadyDone`,
+/// which has no digits. Requiring both leaves the real ones.
+fn opaque_identifiers(text: &str) -> Vec<String> {
+    let blanked = guids(text).iter().fold(text.to_string(), |acc, g| {
+        acc.replace(g, " ").replace(&g.to_ascii_uppercase(), " ")
+    });
+    let mut found = Vec::new();
+    let mut run = String::new();
+    for c in blanked.chars().chain(std::iter::once(' ')) {
+        if c.is_ascii_alphanumeric() || c == '-' {
+            run.push(c);
+        } else {
+            let long = run.len() >= OPAQUE_ID_MIN_LEN;
+            let upper = run.chars().any(|c| c.is_ascii_uppercase());
+            let digit = run.chars().any(|c| c.is_ascii_digit());
+            if long && upper && digit {
+                found.push(std::mem::take(&mut run));
+            }
+            run.clear();
+        }
+    }
+    found
+}
+
 #[test]
 fn corpus_hosts_are_all_fictional() {
     let mut bad = Vec::new();
@@ -292,6 +346,31 @@ fn corpus_hex_identifiers_are_all_synthetic() {
         bad.is_empty(),
         "{count} undashed hex identifier(s) in the corpus were not minted by the \
          scrub -- Forms question ids look like this and are tenant data:\n  {}",
+        bad.iter()
+            .take(20)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n  ")
+    );
+}
+
+#[test]
+fn corpus_opaque_identifiers_are_all_synthetic() {
+    let mut bad = Vec::new();
+    for (file, text) in corpus_files() {
+        for id in opaque_identifiers(&text) {
+            if !id.starts_with(SYNTHETIC_OPAQUE_PREFIX) {
+                bad.push(format!("{file}: {id}"));
+            }
+        }
+    }
+    bad.dedup();
+    let count = bad.len();
+    assert!(
+        bad.is_empty(),
+        "{count} base64 identifier(s) in the corpus were not minted by the scrub \
+         -- a SharePoint drive id and a Forms form id both encode the site and \
+         list they belong to:\n  {}",
         bad.iter()
             .take(20)
             .cloned()
@@ -390,6 +469,48 @@ fn a_forms_question_id_is_recognised_despite_its_prefix() {
 fn short_hex_runs_are_left_alone() {
     // A colour, a truncated sha, a version fragment: all ordinary content.
     assert!(hex_identifiers("#ff00cc and abc123 and deadbeef").is_empty());
+}
+
+#[test]
+fn a_sharepoint_drive_id_is_recognised() {
+    let found = opaque_identifiers(
+        r#""b!9luAMdXbbEWDUm3yeUnQ-pFGdxG4XDpIvM06C_I-8m7engY4h0IxQrfAIIiZBcHT": "/Documents""#,
+    );
+    assert!(
+        found.iter().any(|id| id.starts_with("9luAMdXb")),
+        "the drive id was not found: {found:?}"
+    );
+}
+
+/// The two things that share the drive id's length and character class and are
+/// not identifiers. Flagging either would make the guard cry wolf on every
+/// export, since both appear in all of them.
+#[test]
+fn an_azure_hostname_is_not_mistaken_for_an_identifier() {
+    let found = opaque_identifiers("https://flow-apim-unitedstates-002-westus-01.azure-apim.net");
+    assert!(
+        found.is_empty(),
+        "hostname read as an identifier: {found:?}"
+    );
+}
+
+#[test]
+fn a_schema_field_name_is_not_mistaken_for_an_identifier() {
+    let found = opaque_identifiers(r#""isProcessSimpleApiReferenceConversionAlreadyDone": false"#);
+    assert!(
+        found.is_empty(),
+        "schema field read as an identifier: {found:?}"
+    );
+}
+
+/// A synthetic GUID inside a connection name must not be mistaken for one long
+/// opaque token, or the guard fails on a corpus it has already cleared.
+#[test]
+fn a_scrubbed_connection_name_holds_no_opaque_identifier() {
+    let found = opaque_identifiers(&format!(
+        r#""connectionName": "shared-sharepointonl-{SYNTHETIC_GUID_PREFIX}0007""#
+    ));
+    assert!(found.is_empty(), "clean connection name flagged: {found:?}");
 }
 
 /// The case a tokeniser gets wrong: PA writes connection names as
