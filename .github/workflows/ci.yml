@@ -1,9 +1,9 @@
 name: CI
 
-# Runs the suite on every push and pull request. Until this existed, the 408
-# unit tests and the integration suites in tests/ had only ever run on a
-# developer machine, while release.yml built and shipped artifacts off a tag
-# without having compiled a single test.
+# Runs the suite on every push and pull request. Until this existed, the unit
+# tests and the integration suites in tests/ had only ever run on a developer
+# machine, while release.yml built and shipped artifacts off a tag without
+# having compiled a single test.
 #
 # Style and tests are separate jobs on purpose: a formatting slip should not
 # hide a test failure behind an early exit.
