@@ -722,3 +722,80 @@ fn registry_functions_round_trip_across_categories() {
         drifted.join("\n")
     );
 }
+
+/// PA resolves function names without regard to case, so paxc's registry does
+/// too. The risk in matching loosely is that the decoder starts rendering the
+/// name as the registry spells it rather than as the author wrote it, which
+/// would rewrite a working expression on the way through. Every spelling must
+/// survive a round trip exactly as it arrived.
+#[test]
+fn function_name_casing_survives_the_round_trip() {
+    use serde_json::json;
+
+    let cases = [
+        ("Canonical", "@toLower('AB')"),
+        ("AllLower", "@tolower('AB')"),
+        ("AllUpper", "@TOLOWER('AB')"),
+        ("OtherFn", "@TOUPPER('ab')"),
+        ("Mixed", "@ToLoWeR('AB')"),
+    ];
+
+    let mut actions = serde_json::Map::new();
+    let mut prev: Option<String> = None;
+    for (label, expr) in &cases {
+        let key = format!("Compose_{label}");
+        let run_after = match &prev {
+            Some(p) => json!({ p.clone(): ["Succeeded"] }),
+            None => json!({}),
+        };
+        actions.insert(
+            key.clone(),
+            json!({ "type": "Compose", "runAfter": run_after, "inputs": expr }),
+        );
+        prev = Some(key);
+    }
+
+    let input = json!({
+        "properties": {
+            "displayName": "Function Name Casing",
+            "definition": {
+                "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+                "contentVersion": "1.0.0.0",
+                "triggers": { "manual": { "type": "Request", "kind": "Button", "inputs": {} } },
+                "actions": actions
+            }
+        }
+    });
+
+    let dir = tmp_dir("function_name_casing");
+    let input_path = dir.join("input.json");
+    fs::write(&input_path, serde_json::to_vec_pretty(&input).unwrap()).unwrap();
+
+    let report = decoder::decode_file(&input_path, &dir).expect("decode");
+    assert!(
+        report.warnings.is_empty(),
+        "every spelling should resolve, but the decoder fell back: {:?}",
+        report.warnings
+    );
+
+    let reemitted = compile_pax_to_definition(&dir.join("input.pax"));
+    let emitted = reemitted["definition"]["actions"]
+        .as_object()
+        .expect("actions object");
+    let drifted: Vec<String> = cases
+        .iter()
+        .filter(|(label, expr)| emitted[&format!("Compose_{label}")]["inputs"] != json!(expr))
+        .map(|(label, expr)| {
+            format!(
+                "{label}: expected {expr:?}, got {:?}",
+                emitted[&format!("Compose_{label}")]["inputs"]
+            )
+        })
+        .collect();
+    assert!(
+        drifted.is_empty(),
+        "the author's casing must be preserved, not normalized to the \
+         registry's spelling:\n{}",
+        drifted.join("\n")
+    );
+}

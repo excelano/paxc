@@ -84,7 +84,10 @@ pub mod trigger_type {
 /// Pax type keywords (`array`, `object`) are deliberately not in either
 /// list, so they don't trigger false hints on plain identifier typos.
 pub fn is_known_function(name: &str) -> bool {
-    super::functions::lookup(name).is_some() || super::functions::ACCESSORS.contains(&name)
+    super::functions::lookup(name).is_some()
+        || super::functions::ACCESSORS
+            .iter()
+            .any(|a| a.eq_ignore_ascii_case(name))
 }
 
 #[cfg(test)]

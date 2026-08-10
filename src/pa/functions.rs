@@ -769,8 +769,20 @@ pub static FUNCTIONS: &[FunctionDef] = &[
 ];
 
 /// Linear lookup. Fine at this scale.
+/// Resolve a function name the way PA does: without regard to case.
+///
+/// Verified in the tenant on 2026-08-10 rather than assumed, because nothing
+/// in the published reference says so -- its case-sensitivity notes are all
+/// about how arguments are compared, not how names are resolved. A flow
+/// calling `tolower('AB')` returns `ab`, and so does `TOLOWER('AB')`, while an
+/// invented name fails at run time with "The template function 'x' is not
+/// defined or not valid." So resolution is case-insensitive and symmetric, and
+/// an exact-match lookup here was refusing to lower expressions PA accepts.
+///
+/// Callers render the name as it was written, never as it is spelled in the
+/// table, so a round trip preserves the author's casing.
 pub fn lookup(name: &str) -> Option<&'static FunctionDef> {
-    FUNCTIONS.iter().find(|f| f.name == name)
+    FUNCTIONS.iter().find(|f| f.name.eq_ignore_ascii_case(name))
 }
 
 // ========================================================================
@@ -1291,16 +1303,35 @@ mod tests {
     }
 
     /// `lookup` returns the first match, so a duplicate silently shadows
-    /// whatever arity or evaluator came later in the table.
+    /// whatever arity or evaluator came later in the table. Compared without
+    /// case because that is how `lookup` matches: two entries differing only
+    /// in case would make which one wins depend on table order.
     #[test]
     fn registry_has_no_duplicate_names() {
         let mut seen = std::collections::BTreeSet::new();
         let dupes: Vec<&str> = FUNCTIONS
             .iter()
-            .filter(|f| !seen.insert(f.name))
+            .filter(|f| !seen.insert(f.name.to_ascii_lowercase()))
             .map(|f| f.name)
             .collect();
         assert!(dupes.is_empty(), "duplicate registry entries: {dupes:?}");
+    }
+
+    /// PA resolves function names without regard to case (verified in the
+    /// tenant, see `lookup`). An exact-match registry refused to lower
+    /// expressions PA runs happily -- two corpus actions calling `tolower`
+    /// beside eight calling `toLower` were the case that surfaced it.
+    #[test]
+    fn lookup_ignores_case() {
+        for spelling in ["toLower", "tolower", "TOLOWER", "ToLoWeR"] {
+            let def = lookup(spelling)
+                .unwrap_or_else(|| panic!("`{spelling}` should resolve to the toLower entry"));
+            assert_eq!(def.name, "toLower");
+        }
+        assert!(
+            lookup("noSuchFunctionXyz").is_none(),
+            "case-insensitive matching must not start admitting unknown names"
+        );
     }
 
     /// Accessors are intercepted in `render_call` before the generic-call
