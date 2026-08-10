@@ -354,18 +354,18 @@ mod tests {
 
     #[test]
     fn function_hint_skips_non_function_type_keywords() {
-        // `array` and `object` are pax types with no corresponding PA
-        // expression function, so hinting "did you mean array(...)?" would
-        // mislead. `int`, `string`, and `bool` ARE real PA functions (added
-        // as paxr-evaluated functions alongside parsing / conversion),
-        // so the hint is useful for them.
-        for type_name in ["array", "object"] {
-            assert!(
-                !crate::pa::names::is_known_function(type_name),
-                "non-function type keyword `{type_name}` must not trigger function hint"
-            );
-        }
-        for fn_name in ["int", "string", "bool"] {
+        // `object` is a pax type with no corresponding PA expression
+        // function, so hinting "did you mean object(...)?" would mislead.
+        // The rest are pax type names that PA also publishes as conversion
+        // functions, so the hint is useful for them. `array` and `float`
+        // read like they belong in the first group and do not: PA documents
+        // `array('<value>')` and `float('<value>')`, and completing the
+        // registry from the published reference is what surfaced that.
+        assert!(
+            !crate::pa::names::is_known_function("object"),
+            "non-function type keyword `object` must not trigger function hint"
+        );
+        for fn_name in ["int", "string", "bool", "array", "float"] {
             assert!(
                 crate::pa::names::is_known_function(fn_name),
                 "function-shaped type keyword `{fn_name}` should trigger the hint"

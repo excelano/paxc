@@ -569,3 +569,156 @@ fn decode_then_encode_preserves_original_pa_action_key() {
         actions.keys().collect::<Vec<_>>()
     );
 }
+
+/// Issue #25: a designer-shaped `Compose_<id>` whose expression calls the
+/// URI-component functions must collapse to `let <id> = ...` rather than
+/// falling back to an opaque `pa` block. The corpus happens to cover this
+/// through one flow that calls `decodeUriComponent`, but corpus contents are
+/// refreshed from a live tenant and can stop covering it without anyone
+/// noticing, so the property gets a fixture that does not depend on them.
+#[test]
+fn compose_calling_uri_component_functions_lowers_to_a_let() {
+    use serde_json::json;
+
+    let expr = "@replace(variables('raw'), decodeUriComponent('%0D%0A%0D%0A'), \
+                encodeUriComponent('%0D%0A'))";
+    let input = json!({
+        "properties": {
+            "displayName": "URI Component Round-Trip",
+            "definition": {
+                "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+                "contentVersion": "1.0.0.0",
+                "triggers": { "manual": { "type": "Request", "kind": "Button", "inputs": {} } },
+                "actions": {
+                    "Initialize_variable_raw": {
+                        "type": "InitializeVariable",
+                        "runAfter": {},
+                        "inputs": { "variables": [ { "name": "raw", "type": "string", "value": "" } ] }
+                    },
+                    "Compose_Cleaned": {
+                        "type": "Compose",
+                        "runAfter": { "Initialize_variable_raw": ["Succeeded"] },
+                        "inputs": expr
+                    }
+                }
+            }
+        }
+    });
+
+    let dir = tmp_dir("uri_component_roundtrip");
+    let input_path = dir.join("input.json");
+    fs::write(&input_path, serde_json::to_vec_pretty(&input).unwrap()).unwrap();
+
+    let report = decoder::decode_file(&input_path, &dir).expect("decode");
+    assert!(
+        !report
+            .warnings
+            .iter()
+            .any(|w| w.contains("Compose_Cleaned")),
+        "Compose_Cleaned should decode natively, but the decoder reported: {:?}",
+        report.warnings
+    );
+
+    let pax = fs::read_to_string(dir.join("input.pax")).unwrap();
+    assert!(
+        pax.contains("let Cleaned = replace(raw, decodeUriComponent(")
+            && pax.contains("encodeUriComponent("),
+        "expected a native let binding over the URI-component calls, got:\n{pax}"
+    );
+
+    // The expression must survive re-emit unchanged, not merely decode.
+    let reemitted = compile_pax_to_definition(&dir.join("input.pax"));
+    assert_eq!(
+        reemitted["definition"]["actions"]["Compose_Cleaned"]["inputs"],
+        json!(expr),
+        "re-emitted expression drifted from the original"
+    );
+}
+
+/// The function registry is the gate the decoder consults before rendering a
+/// generic call, so a name missing from it silently downgrades a whole action
+/// to a `pa` block -- which is how `union` was hiding an entire foreach body.
+/// This walks one function from each category the registry covers and asserts
+/// the expression round-trips byte-identically, so a future edit that drops or
+/// mistypes an entry fails here rather than quietly losing fidelity.
+#[test]
+fn registry_functions_round_trip_across_categories() {
+    use serde_json::json;
+
+    let cases = [
+        ("Union", "@union(variables('xs'), variables('xs'))"),
+        ("Base64", "@base64ToString(base64('hello'))"),
+        ("DateTime", "@addDays(utcNow(), 3, 'yyyy-MM-dd')"),
+        ("Json", "@setProperty(json('{}'), 'k', 'v')"),
+        ("Uri", "@uriHost('https://example.com/a/b')"),
+        ("Math", "@pow(2, 8)"),
+        ("Xml", "@xpath(xml('<r><a>1</a></r>'), '//a')"),
+        ("Conversion", "@float(string(decimal('1.5')))"),
+    ];
+
+    let mut actions = serde_json::Map::new();
+    actions.insert(
+        "Initialize_variable_xs".to_string(),
+        json!({
+            "type": "InitializeVariable",
+            "runAfter": {},
+            "inputs": { "variables": [ { "name": "xs", "type": "array", "value": [] } ] }
+        }),
+    );
+    let mut prev = "Initialize_variable_xs".to_string();
+    for (label, expr) in &cases {
+        let key = format!("Compose_{label}");
+        actions.insert(
+            key.clone(),
+            json!({
+                "type": "Compose",
+                "runAfter": { prev.clone(): ["Succeeded"] },
+                "inputs": expr
+            }),
+        );
+        prev = key;
+    }
+
+    let input = json!({
+        "properties": {
+            "displayName": "Registry Coverage Round-Trip",
+            "definition": {
+                "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+                "contentVersion": "1.0.0.0",
+                "triggers": { "manual": { "type": "Request", "kind": "Button", "inputs": {} } },
+                "actions": actions
+            }
+        }
+    });
+
+    let dir = tmp_dir("registry_categories_roundtrip");
+    let input_path = dir.join("input.json");
+    fs::write(&input_path, serde_json::to_vec_pretty(&input).unwrap()).unwrap();
+
+    let report = decoder::decode_file(&input_path, &dir).expect("decode");
+    assert!(
+        report.warnings.is_empty(),
+        "every case should decode natively, but the decoder fell back: {:?}",
+        report.warnings
+    );
+
+    let reemitted = compile_pax_to_definition(&dir.join("input.pax"));
+    let emitted = reemitted["definition"]["actions"]
+        .as_object()
+        .expect("actions object");
+    let drifted: Vec<String> = cases
+        .iter()
+        .filter(|(label, expr)| emitted[&format!("Compose_{label}")]["inputs"] != json!(expr))
+        .map(|(label, expr)| {
+            format!(
+                "{label}: expected {expr:?}, got {:?}",
+                emitted[&format!("Compose_{label}")]["inputs"]
+            )
+        })
+        .collect();
+    assert!(
+        drifted.is_empty(),
+        "expressions drifted:\n{}",
+        drifted.join("\n")
+    );
+}

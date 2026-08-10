@@ -65,9 +65,11 @@ pub static ACCESSORS: &[&str] = &[
     "triggerOutputs",
 ];
 
-/// The full registry. Order is grouped by category for readability; the
-/// dispatcher does a linear scan, which is fine at this scale (well under
-/// 100 entries).
+/// The full registry: every function in PA's published expression-function
+/// reference except the handful noted at the stub block below. Order is
+/// grouped by category for readability; the dispatcher does a linear scan,
+/// which stays cheap at a couple of hundred entries because lookups happen
+/// once per call site, not once per evaluation step.
 pub static FUNCTIONS: &[FunctionDef] = &[
     // arithmetic / numeric
     FunctionDef {
@@ -291,8 +293,17 @@ pub static FUNCTIONS: &[FunctionDef] = &[
         arity: Arity::Exact(2),
         paxr_eval: Some(eval_take),
     },
-    // recognized but not paxr-implemented (real PA functions; users get the
-    // standard "skipping unknown" notice locally, but resolver hints work)
+    // Recognized but not paxr-implemented. These are real PA functions taken
+    // from the published expression-function reference, so the decoder can
+    // lower calls to them into pax source and the resolver's hints work, but
+    // paxr can't simulate them locally -- users get the standard "skipping
+    // unknown" notice. Arities come from each function's documented signature.
+    //
+    // `if` is deliberately absent: it is a pax statement keyword, so
+    // `let x = if(a, b, c)` does not parse, and registering it would make the
+    // decoder emit pax source that cannot compile. `items`, `outputs`, and
+    // `variables` are absent because they are ACCESSORS, intercepted in
+    // `render_call` before the generic-call path ever sees them.
     FunctionDef {
         name: "utcNow",
         arity: Arity::AtLeast(0),
@@ -301,6 +312,410 @@ pub static FUNCTIONS: &[FunctionDef] = &[
     FunctionDef {
         name: "formatDateTime",
         arity: Arity::AtLeast(0),
+        paxr_eval: None,
+    },
+    // string
+    FunctionDef {
+        name: "chunk",
+        arity: Arity::Exact(2),
+        paxr_eval: None,
+    },
+    FunctionDef {
+        name: "formatNumber",
+        arity: Arity::Range(2, 3),
+        paxr_eval: None,
+    },
+    FunctionDef {
+        name: "isFloat",
+        arity: Arity::Range(1, 2),
+        paxr_eval: None,
+    },
+    FunctionDef {
+        name: "isInt",
+        arity: Arity::Exact(1),
+        paxr_eval: None,
+    },
+    FunctionDef {
+        name: "nthIndexOf",
+        arity: Arity::Exact(3),
+        paxr_eval: None,
+    },
+    FunctionDef {
+        name: "slice",
+        arity: Arity::Range(2, 3),
+        paxr_eval: None,
+    },
+    FunctionDef {
+        name: "trimByteOrderMark",
+        arity: Arity::Exact(1),
+        paxr_eval: None,
+    },
+    // collection
+    FunctionDef {
+        name: "intersection",
+        arity: Arity::AtLeast(2),
+        paxr_eval: None,
+    },
+    FunctionDef {
+        name: "reverse",
+        arity: Arity::Exact(1),
+        paxr_eval: None,
+    },
+    FunctionDef {
+        name: "sort",
+        arity: Arity::Range(1, 2),
+        paxr_eval: None,
+    },
+    FunctionDef {
+        name: "union",
+        arity: Arity::AtLeast(2),
+        paxr_eval: None,
+    },
+    // logical comparison
+    FunctionDef {
+        name: "strongEquals",
+        arity: Arity::AtLeast(2),
+        paxr_eval: None,
+    },
+    // conversion
+    FunctionDef {
+        name: "array",
+        arity: Arity::Exact(1),
+        paxr_eval: None,
+    },
+    FunctionDef {
+        name: "base64",
+        arity: Arity::Exact(1),
+        paxr_eval: None,
+    },
+    FunctionDef {
+        name: "base64ToBinary",
+        arity: Arity::Exact(1),
+        paxr_eval: None,
+    },
+    FunctionDef {
+        name: "base64ToJson",
+        arity: Arity::Exact(1),
+        paxr_eval: None,
+    },
+    FunctionDef {
+        name: "base64ToString",
+        arity: Arity::Exact(1),
+        paxr_eval: None,
+    },
+    FunctionDef {
+        name: "binary",
+        arity: Arity::Exact(1),
+        paxr_eval: None,
+    },
+    FunctionDef {
+        name: "dataUri",
+        arity: Arity::Exact(1),
+        paxr_eval: None,
+    },
+    FunctionDef {
+        name: "dataUriToBinary",
+        arity: Arity::Exact(1),
+        paxr_eval: None,
+    },
+    FunctionDef {
+        name: "dataUriToString",
+        arity: Arity::Exact(1),
+        paxr_eval: None,
+    },
+    FunctionDef {
+        name: "decimal",
+        arity: Arity::Exact(1),
+        paxr_eval: None,
+    },
+    FunctionDef {
+        name: "decodeBase64", // deprecated
+        arity: Arity::Exact(1),
+        paxr_eval: None,
+    },
+    FunctionDef {
+        name: "decodeDataUri",
+        arity: Arity::Exact(1),
+        paxr_eval: None,
+    },
+    FunctionDef {
+        name: "decodeUriComponent",
+        arity: Arity::Exact(1),
+        paxr_eval: None,
+    },
+    FunctionDef {
+        name: "encodeBase64",
+        arity: Arity::Exact(1),
+        paxr_eval: None,
+    },
+    FunctionDef {
+        name: "encodeUriComponent",
+        arity: Arity::Exact(1),
+        paxr_eval: None,
+    },
+    FunctionDef {
+        name: "float",
+        arity: Arity::Range(1, 2),
+        paxr_eval: None,
+    },
+    FunctionDef {
+        name: "json",
+        arity: Arity::Exact(1),
+        paxr_eval: None,
+    },
+    FunctionDef {
+        name: "uriComponentToBinary",
+        arity: Arity::Exact(1),
+        paxr_eval: None,
+    },
+    FunctionDef {
+        name: "xml",
+        arity: Arity::Exact(1),
+        paxr_eval: None,
+    },
+    // math
+    FunctionDef {
+        name: "pow",
+        arity: Arity::Exact(2),
+        paxr_eval: None,
+    },
+    FunctionDef {
+        name: "rand",
+        arity: Arity::Exact(2),
+        paxr_eval: None,
+    },
+    // date and time
+    FunctionDef {
+        name: "addDays",
+        arity: Arity::Range(2, 3),
+        paxr_eval: None,
+    },
+    FunctionDef {
+        name: "addHours",
+        arity: Arity::Range(2, 3),
+        paxr_eval: None,
+    },
+    FunctionDef {
+        name: "addMinutes",
+        arity: Arity::Range(2, 3),
+        paxr_eval: None,
+    },
+    FunctionDef {
+        name: "addSeconds",
+        arity: Arity::Range(2, 3),
+        paxr_eval: None,
+    },
+    FunctionDef {
+        name: "addToTime",
+        arity: Arity::Range(3, 4),
+        paxr_eval: None,
+    },
+    FunctionDef {
+        name: "convertFromUtc",
+        arity: Arity::Range(2, 3),
+        paxr_eval: None,
+    },
+    FunctionDef {
+        name: "convertTimeZone",
+        arity: Arity::Range(3, 4),
+        paxr_eval: None,
+    },
+    FunctionDef {
+        name: "convertToUtc",
+        arity: Arity::Range(2, 3),
+        paxr_eval: None,
+    },
+    FunctionDef {
+        name: "dateDifference",
+        arity: Arity::Exact(2),
+        paxr_eval: None,
+    },
+    FunctionDef {
+        name: "dayOfMonth",
+        arity: Arity::Exact(1),
+        paxr_eval: None,
+    },
+    FunctionDef {
+        name: "dayOfWeek",
+        arity: Arity::Exact(1),
+        paxr_eval: None,
+    },
+    FunctionDef {
+        name: "dayOfYear",
+        arity: Arity::Exact(1),
+        paxr_eval: None,
+    },
+    FunctionDef {
+        name: "formatTimeSpan",
+        arity: Arity::Range(2, 3),
+        paxr_eval: None,
+    },
+    FunctionDef {
+        name: "getFutureTime",
+        arity: Arity::Range(2, 3),
+        paxr_eval: None,
+    },
+    FunctionDef {
+        name: "getPastTime",
+        arity: Arity::Range(2, 3),
+        paxr_eval: None,
+    },
+    FunctionDef {
+        name: "parseDateTime",
+        arity: Arity::Range(1, 3),
+        paxr_eval: None,
+    },
+    FunctionDef {
+        name: "startOfDay",
+        arity: Arity::Range(1, 2),
+        paxr_eval: None,
+    },
+    FunctionDef {
+        name: "startOfHour",
+        arity: Arity::Range(1, 2),
+        paxr_eval: None,
+    },
+    FunctionDef {
+        name: "startOfMonth",
+        arity: Arity::Range(1, 2),
+        paxr_eval: None,
+    },
+    FunctionDef {
+        name: "subtractFromTime",
+        arity: Arity::Range(3, 4),
+        paxr_eval: None,
+    },
+    FunctionDef {
+        name: "ticks",
+        arity: Arity::Exact(1),
+        paxr_eval: None,
+    },
+    // workflow
+    FunctionDef {
+        name: "action",
+        arity: Arity::Exact(0),
+        paxr_eval: None,
+    },
+    FunctionDef {
+        name: "formDataMultiValues",
+        arity: Arity::Exact(2),
+        paxr_eval: None,
+    },
+    FunctionDef {
+        name: "formDataValue",
+        arity: Arity::Exact(2),
+        paxr_eval: None,
+    },
+    FunctionDef {
+        name: "listCallbackUrl",
+        arity: Arity::Exact(0),
+        paxr_eval: None,
+    },
+    FunctionDef {
+        name: "multipartBody",
+        arity: Arity::Exact(2),
+        paxr_eval: None,
+    },
+    FunctionDef {
+        name: "result",
+        arity: Arity::Exact(1),
+        paxr_eval: None,
+    },
+    FunctionDef {
+        name: "triggerFormDataMultiValues",
+        arity: Arity::Exact(1),
+        paxr_eval: None,
+    },
+    FunctionDef {
+        name: "triggerFormDataValue",
+        arity: Arity::Exact(1),
+        paxr_eval: None,
+    },
+    FunctionDef {
+        name: "triggerMultipartBody",
+        arity: Arity::Exact(1),
+        paxr_eval: None,
+    },
+    FunctionDef {
+        name: "workflow",
+        arity: Arity::Exact(0),
+        paxr_eval: None,
+    },
+    // uri parsing
+    FunctionDef {
+        name: "uriHost",
+        arity: Arity::Exact(1),
+        paxr_eval: None,
+    },
+    FunctionDef {
+        name: "uriPath",
+        arity: Arity::Exact(1),
+        paxr_eval: None,
+    },
+    FunctionDef {
+        name: "uriPathAndQuery",
+        arity: Arity::Exact(1),
+        paxr_eval: None,
+    },
+    FunctionDef {
+        name: "uriPort",
+        arity: Arity::Exact(1),
+        paxr_eval: None,
+    },
+    FunctionDef {
+        name: "uriQuery",
+        arity: Arity::Exact(1),
+        paxr_eval: None,
+    },
+    FunctionDef {
+        name: "uriScheme",
+        arity: Arity::Exact(1),
+        paxr_eval: None,
+    },
+    // manipulation: json & xml
+    FunctionDef {
+        name: "addProperty",
+        arity: Arity::Exact(3),
+        paxr_eval: None,
+    },
+    FunctionDef {
+        name: "decodeXmlName",
+        arity: Arity::Exact(1),
+        paxr_eval: None,
+    },
+    FunctionDef {
+        name: "decodeXmlValue",
+        arity: Arity::Exact(1),
+        paxr_eval: None,
+    },
+    FunctionDef {
+        name: "encodeXmlName",
+        arity: Arity::Exact(1),
+        paxr_eval: None,
+    },
+    FunctionDef {
+        name: "encodeXmlValue",
+        arity: Arity::Exact(1),
+        paxr_eval: None,
+    },
+    FunctionDef {
+        name: "mergeObjects",
+        arity: Arity::Exact(2),
+        paxr_eval: None,
+    },
+    FunctionDef {
+        name: "removeProperty",
+        arity: Arity::Exact(2),
+        paxr_eval: None,
+    },
+    FunctionDef {
+        name: "setProperty",
+        arity: Arity::Exact(3),
+        paxr_eval: None,
+    },
+    FunctionDef {
+        name: "xpath",
+        arity: Arity::Exact(2),
         paxr_eval: None,
     },
     // PA accessors -- recognized so the decoder can emit them as call forms
@@ -829,5 +1244,76 @@ fn eval_take(args: &[Value]) -> Value {
             Value::Array(items.iter().take(n).cloned().collect())
         }
         _ => Value::Null,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lexer;
+    use crate::parser;
+    use chumsky::Parser as _;
+    use chumsky::input::Input;
+
+    /// Every registered name must be legal in pax call position. The decoder
+    /// gates generic-call rendering on `is_known_function`, so a name that the
+    /// registry admits but the parser rejects turns decode output into pax
+    /// source that cannot compile. `if` is the live example: it is a pax
+    /// statement keyword, so it stays out of the registry, and this test is
+    /// what keeps the next such addition from landing unnoticed. Type-name
+    /// keywords (`int`, `string`, `bool`, `float`, `array`) are fine here --
+    /// they are only reserved in type position.
+    #[test]
+    fn every_registered_name_parses_in_call_position() {
+        let mut rejected: Vec<&str> = Vec::new();
+        for def in FUNCTIONS {
+            let src = format!("let _probe = {}()", def.name);
+            let Ok(tokens) = lexer::lexer().parse(src.as_str()).into_result() else {
+                rejected.push(def.name);
+                continue;
+            };
+            let parsed = parser::parser()
+                .parse(
+                    tokens
+                        .as_slice()
+                        .map((src.len()..src.len()).into(), |(t, s)| (t, s)),
+                )
+                .into_result();
+            if parsed.is_err() {
+                rejected.push(def.name);
+            }
+        }
+        assert!(
+            rejected.is_empty(),
+            "registered function names that pax cannot parse as calls, so the \
+             decoder would emit uncompilable source for them: {rejected:?}"
+        );
+    }
+
+    /// `lookup` returns the first match, so a duplicate silently shadows
+    /// whatever arity or evaluator came later in the table.
+    #[test]
+    fn registry_has_no_duplicate_names() {
+        let mut seen = std::collections::BTreeSet::new();
+        let dupes: Vec<&str> = FUNCTIONS
+            .iter()
+            .filter(|f| !seen.insert(f.name))
+            .map(|f| f.name)
+            .collect();
+        assert!(dupes.is_empty(), "duplicate registry entries: {dupes:?}");
+    }
+
+    /// Accessors are intercepted in `render_call` before the generic-call
+    /// path, so listing them in `FUNCTIONS` as well would create an entry
+    /// that can never be reached through rendering.
+    #[test]
+    fn intercepted_accessors_are_not_also_registered() {
+        for name in ["variables", "items", "outputs"] {
+            assert!(
+                lookup(name).is_none(),
+                "`{name}` is intercepted in render_call; a FunctionDef entry \
+                 for it is unreachable"
+            );
+        }
     }
 }
