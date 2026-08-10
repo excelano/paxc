@@ -346,18 +346,25 @@ a `SetVariable`/`AppendTo*`/`Increment` target, naming nothing an
 `InitializeVariable` declares), `expr-unknown-action` (an `outputs`, `body`,
 `actions` or `result` call naming no action or trigger), `expr-items-outside-loop`,
 `expr-unknown-parameter`, `expr-unbalanced-parens`, `expr-unterminated-string`,
-`expr-unterminated-interpolation`. Near-miss names carry a "did you mean".
+`expr-unterminated-interpolation`, `expr-unknown-function` (a call to something
+PA does not define, which fails the run rather than the import). Near-miss
+names carry a "did you mean".
 
-Name resolution folds case, because PA's expression language does not
-distinguish it. An accessor whose first argument is computed rather than a
-literal is left alone rather than guessed at.
+Name resolution folds case, because PA folds case when it resolves a function
+name — `tolower` and `toLower` both run. An accessor whose first argument is
+computed rather than a literal is left alone rather than guessed at.
+
+A call is only a call inside an expression region. Word-plus-paren in literal
+text is not one, which is what keeps a SharePoint URI containing
+`getbytitle('X')`, or an email body containing the words "Direct reports (if
+any)", from being reported.
 
 **Not checked.** Connector `operationId`s and parameter keys, so a body naming
-an operation the connector does not have still passes. Function names, because
-paxc's registry is the set it can lower rather than the set PA defines. And a
-parse failure is never reported as a malformed expression — delimiter balance
-is checked lexically instead, so valid PA that pax cannot render is not
-mistaken for a defect.
+an operation the connector does not have still passes. Argument counts, so a
+real function called with the wrong number of arguments passes. And a parse
+failure is never reported as a malformed expression — delimiter balance is
+checked lexically instead, so valid PA that pax cannot render is not mistaken
+for a defect.
 
 ## Round-trip decoder coverage
 

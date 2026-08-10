@@ -7,7 +7,7 @@
 //! ignores them is looking at the quarter of the artifact that happens to be
 //! structural.
 //!
-//! Two things this deliberately does not do.
+//! Two things it deliberately declines, and one it used to.
 //!
 //! It does not report a parse failure as a malformed expression. `paexpr`
 //! has a full recursive-descent parser, but it declines some valid PA on
@@ -16,11 +16,16 @@
 //! Delimiter balance is checked lexically instead, which is what catches the
 //! unclosed paren without inheriting the grammar's deliberate gaps.
 //!
-//! It does not check function names against `pa::functions`. That registry
-//! holds 53 entries and is the set paxc can lower, not the set PA defines.
-//! The corpus alone calls `union` and `decodeUriComponent`, both real and
-//! both absent, so the check would fire on working flows. It becomes
-//! possible once the registry covers PA's published function library.
+//! It does not resolve a call's arguments beyond the first, and only when
+//! that first argument is a plain string literal. One corpus call in 249
+//! computes its argument, and guessing at those would be inventing findings.
+//!
+//! It does check function names against `pa::functions`, which it could not
+//! do while that registry held 53 of the 137 functions PA publishes — the
+//! corpus alone calls `union` and `decodeUriComponent`, both real and both
+//! then absent. The registry now covers the published library and resolves
+//! names without regard to case, as PA does, so the check reports nothing on
+//! all six corpus flows.
 //!
 //! Scanning is lexical and quote-aware rather than a regex over the whole
 //! string, and that distinction is load-bearing. One corpus flow builds a
@@ -42,6 +47,7 @@ pub const UNKNOWN_VARIABLE: &str = "expr-unknown-variable";
 pub const UNKNOWN_ACTION: &str = "expr-unknown-action";
 pub const UNKNOWN_PARAMETER: &str = "expr-unknown-parameter";
 pub const ITEMS_OUTSIDE_LOOP: &str = "expr-items-outside-loop";
+pub const UNKNOWN_FUNCTION: &str = "expr-unknown-function";
 
 /// Keys under an action that hold nested actions. Walked separately, with
 /// their own path and their own enclosing-loop context, so they must not be
@@ -78,11 +84,13 @@ struct Declared {
 }
 
 impl Declared {
-    /// Case-insensitive membership. PA's expression language does not
-    /// distinguish case — one corpus expression calls both `toLower` and
-    /// `tolower` — and rather than take a position on whether names are
-    /// folded too, a difference in case is treated as a match so the check
-    /// cannot invent a defect out of one.
+    /// Case-insensitive membership. PA folds case when resolving function
+    /// names, confirmed in a tenant on 2026-08-10 — one corpus expression
+    /// calls both `toLower` and `tolower`, and both run. Whether it also
+    /// folds the *names* a flow declares, a variable or an action key, has
+    /// not been tested, so this matches loosely rather than claiming it does.
+    /// The cost of matching loosely is a missed finding; the cost of matching
+    /// strictly would be inventing one on a working flow.
     fn holds(set: &HashSet<String>, name: &str) -> bool {
         set.contains(name) || set.iter().any(|d| d.eq_ignore_ascii_case(name))
     }
@@ -359,6 +367,25 @@ fn check_string(
         _ => {}
     }
 
+    for call in &scan.calls {
+        if crate::pa::names::is_known_function(call) {
+            continue;
+        }
+        out.push(
+            Finding::error(
+                UNKNOWN_FUNCTION,
+                path,
+                format!("`{call}(...)` is not a Power Automate expression function"),
+            )
+            .with_note(nearest_function_hint(call).unwrap_or_else(|| {
+                format!(
+                    "PA fails the run with \"The template function '{call}' is not defined or \
+                     not valid.\""
+                )
+            })),
+        );
+    }
+
     for reference in &scan.refs {
         let Some(arg) = &reference.arg else { continue };
         let func = reference.func.as_str();
@@ -423,6 +450,19 @@ fn check_string(
     }
 }
 
+/// "did you mean" against the function library, for the case the check is
+/// most likely to be reporting: a real function with a slipped character.
+/// Case alone never lands here, because the registry already resolves names
+/// the way PA does and a case variant is not a finding at all.
+fn nearest_function_hint(name: &str) -> Option<String> {
+    let near = crate::pa::functions::FUNCTIONS
+        .iter()
+        .map(|f| f.name)
+        .chain(crate::pa::functions::ACCESSORS.iter().copied())
+        .find(|known| close(known, name))?;
+    Some(format!("did you mean `{near}`?"))
+}
+
 /// "did you mean" for a name that differs from a declared one only by case
 /// or by a character or two. Kept cheap: exact-length single-edit distance
 /// is enough to catch the typo without pretending to be a spell checker.
@@ -479,6 +519,11 @@ struct Reference {
 #[derive(Default)]
 struct Scan {
     refs: Vec<Reference>,
+    /// Every call-shaped name found in an expression region, accessors
+    /// included. `refs` holds only the subset whose argument names something
+    /// declared elsewhere in the flow; this holds all of them, because a
+    /// function that does not exist is a defect whatever it was called with.
+    calls: Vec<String>,
     paren_balance: i32,
     unterminated_string: bool,
     unterminated_interpolation: bool,
@@ -604,11 +649,14 @@ fn scan_region(region: &str, out: &mut Scan) {
                 while j < bytes.len() && bytes[j] == b' ' {
                     j += 1;
                 }
-                if bytes.get(j) == Some(&b'(') && is_checkable_accessor(word) {
-                    out.refs.push(Reference {
-                        func: word.to_string(),
-                        arg: literal_first_arg(region, j + 1),
-                    });
+                if bytes.get(j) == Some(&b'(') {
+                    out.calls.push(word.to_string());
+                    if is_checkable_accessor(word) {
+                        out.refs.push(Reference {
+                            func: word.to_string(),
+                            arg: literal_first_arg(region, j + 1),
+                        });
+                    }
                 }
             }
             _ => i += 1,
@@ -817,9 +865,16 @@ mod tests {
 
     #[test]
     fn call_shaped_text_outside_an_interpolation_is_not_a_call() {
-        // The SharePoint URI case from the corpus: `getbytitle('X')` is
-        // literal text, and so is a `variables('ghost')` that never sits
-        // inside `@{...}`.
+        // The SharePoint URI case from the corpus, verbatim in shape:
+        // `getbytitle('X')` is literal text that looks exactly like a call to
+        // an undefined function, and so is a `variables('ghost')` that never
+        // sits inside `@{...}`. Only the interpolated part is expression.
+        let f = run(json!({"actions": {
+            "A": {"type": "Compose",
+                  "inputs": "_api/web/lists/getbytitle('Request Log')/items(@{outputs('A')})"},
+        }}));
+        assert!(f.is_empty(), "{f:?}");
+
         let f = run(json!({"actions": {
             "A": {"type": "Compose",
                   "inputs": "_api/web/lists/variables('ghost')/items(@{outputs('A')})"},
@@ -886,6 +941,69 @@ mod tests {
             "parameters": {"$connections": {"type": "Object"}},
             "actions": {"A": {"type": "Compose", "inputs": "@parameters('$connections')"}},
         }));
+        assert!(f.is_empty(), "{f:?}");
+    }
+    #[test]
+    fn an_unknown_function_is_reported() {
+        let f = run(json!({"actions": {
+            "A": {"type": "Compose", "inputs": "@noSuchFunctionXyz('AB')"},
+        }}));
+        assert_eq!(codes(&f), vec![UNKNOWN_FUNCTION]);
+        assert!(
+            f[0].note
+                .as_deref()
+                .unwrap()
+                .contains("not defined or not valid"),
+            "the note should quote PA's own failure text: {:?}",
+            f[0].note
+        );
+    }
+
+    /// PA resolves function names without regard to case, verified in the
+    /// tenant. A case variant is not a finding, and reporting one would fire
+    /// on a working production flow -- two corpus actions call `tolower`.
+    #[test]
+    fn a_case_variant_of_a_known_function_is_not_reported() {
+        for spelling in ["toLower", "tolower", "TOLOWER", "ToLoWeR"] {
+            let f = run(json!({"actions": {
+                "A": {"type": "Compose", "inputs": format!("@{spelling}('AB')")},
+            }}));
+            assert!(f.is_empty(), "`{spelling}` should resolve: {f:?}");
+        }
+    }
+
+    /// The likely real-world shape is a slipped character, not an invented
+    /// name, so the note points at the function that was probably meant.
+    #[test]
+    fn a_near_miss_function_name_gets_a_hint() {
+        let f = run(json!({"actions": {
+            "A": {"type": "Compose", "inputs": "@toLowr('AB')"},
+        }}));
+        assert_eq!(codes(&f), vec![UNKNOWN_FUNCTION]);
+        assert_eq!(f[0].note.as_deref(), Some("did you mean `toLower`?"));
+    }
+
+    /// The other corpus false positive a regex would produce: an email body
+    /// carrying the English words "Direct reports (if any)". Word-plus-paren
+    /// is only a call inside an expression region.
+    #[test]
+    fn prose_containing_a_word_before_a_paren_is_not_a_call() {
+        let f = run(json!({"actions": {
+            "A": {"type": "Compose",
+                  "inputs": "<b>Direct reports (if any)</b>: @{outputs('A')}"},
+        }}));
+        assert!(f.is_empty(), "{f:?}");
+    }
+
+    /// Accessors are functions for this purpose; they resolve through
+    /// ACCESSORS rather than the registry and must not be reported.
+    #[test]
+    fn accessors_are_not_reported_as_unknown_functions() {
+        let f = run(with_var(
+            "v",
+            json!({"type": "Compose",
+                   "inputs": "@concat(variables('v'), string(utcNow()), triggerBody())"}),
+        ));
         assert!(f.is_empty(), "{f:?}");
     }
 }
