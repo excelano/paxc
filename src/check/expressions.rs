@@ -487,7 +487,12 @@ fn nearest_hint(declared: &HashSet<String>, name: &str) -> Option<String> {
     Some(format!("did you mean `{near}`?"))
 }
 
-fn close(a: &str, b: &str) -> bool {
+/// Whether two names differ by a transposition, a case fold, or a character
+/// or two — the shape of a typo rather than of a different word.
+///
+/// Public because the `--allow` flag wants the same treatment for a mistyped
+/// finding code that an expression gets for a mistyped function name.
+pub fn close(a: &str, b: &str) -> bool {
     if a.len().abs_diff(b.len()) > 1 {
         return false;
     }

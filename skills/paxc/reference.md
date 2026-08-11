@@ -24,6 +24,7 @@ paxr --version
 | `--decode` (paxc) | reverse mode: read an exported PA flow (zip or inner `definition.json`) and write `.pax` source + `pa/` folder |
 | `--out-dir DIR` (paxc, decode) | for `.json` input, defaults to the input's parent directory; for `.zip`, defaults to a sister dir named after the zip's stem |
 | `--check` (paxc) | read an exported PA flow (zip or inner `definition.json`) and report problems in it; writes nothing, exits 1 when any finding is an error |
+| `--allow CODE` (paxc) | demote one finding code from error to warning; repeatable. Applies to a compile and to `--check`. Unknown codes are rejected |
 | `--verbose` / `-v` (paxr) | trace every action the interpreter touches (`init`, `set`, `increment`, `compose`, `condition?`, `iter[N]`, …) |
 | `--quiet` / `-q` (paxr) | suppress all output; exit code only |
 | `--debug` / `-d` (paxr) | print only `debug()` output, no state dump |
@@ -317,7 +318,43 @@ structural sequence wins on emit. This is why pasting PA "Peek code" into a
 `pa/<Name>.json` Just Works: the file's internal `runAfter` is ignored, so
 there's no need to rewrite it to match its new context.
 
-## Checking a flow (`--check`)
+## Checking a flow
+
+The same checks run in two places: on demand against any flow definition with
+`--check`, and automatically over the `pa/` bodies a compile is about to emit.
+
+### During a compile
+
+Compiling runs the checks over the flow it is about to produce and reports
+anything that lands inside a `pa/` body, pointing at the file you edited rather
+than at generated JSON:
+
+```
+Error: [expr-unknown-function] `noSuchFn(...)` is not a Power Automate expression function
+   ╭─[ pa/Send_an_email.json:12:15 ]
+12 │       "Subject": "@noSuchFn(variables('title'))"
+   │                  ─────────────┬─────────────────
+   │                               ╰─── here
+```
+
+This closes the gap that pax source has always been validated and `pa/` bodies
+never were. An error fails the compile and **nothing is written** — no JSON on
+stdout, no `.zip`.
+
+`--allow <CODE>` demotes one code from error to warning; repeat it for more.
+The finding is still reported in full, with a note saying it was allowed. It is
+there for when paxc is wrong about your flow and you would rather ship than wait
+for a fix. An unknown code is rejected rather than accepted silently, since a
+mistyped `--allow` would otherwise fail the build for the reason it was passed
+to prevent. `--allow` means the same thing in `--check`.
+
+Findings that fall outside every `pa/` body are not the author's: that is JSON
+paxc generated from pax the resolver already validated, so one of them is a paxc
+bug. They report as such, name the issue tracker, and are fatal — shipping a
+flow paxc knows is broken is worse than an alarming message. `--allow` does not
+reach them.
+
+### On demand (`--check`)
 
 `paxc --check` reads a flow definition and reports problems in it. It writes
 nothing, compiles nothing, and needs no `.pax` source: the input is the
@@ -358,6 +395,10 @@ A call is only a call inside an expression region. Word-plus-paren in literal
 text is not one, which is what keeps a SharePoint URI containing
 `getbytitle('X')`, or an email body containing the words "Direct reports (if
 any)", from being reported.
+
+`$authentication` and `$connections` need no declaration. PA supplies both, and
+a bare definition or a hand-assembled fragment carries neither while still being
+correct — only a complete export declares them.
 
 **Not checked.** Connector `operationId`s and parameter keys, so a body naming
 an operation the connector does not have still passes. Argument counts, so a

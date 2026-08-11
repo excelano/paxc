@@ -12,16 +12,29 @@ struct Args {
     decode: bool,
     check: bool,
     out_dir: Option<PathBuf>,
+    /// Finding codes demoted from error to warning. Still reported, still
+    /// visible — just not fatal.
+    allow: Vec<String>,
 }
 
 /// paxc's own flags. The shared tail is appended at use.
 const USAGE_HEAD: &str = "\
-usage: paxc [--target <pa-legacy>] [--name <NAME>] [--out <PATH>] <file.pax>
+usage: paxc [--target <pa-legacy>] [--name <NAME>] [--out <PATH>] [--allow <CODE>] <file.pax>
 
 With no --target: writes the Power Automate flow definition JSON to stdout.
 With --target pa-legacy: writes a legacy PA import package (.zip). Defaults:
   --name  input file basename without .pax (or pa/flow.json's displayName when present)
   --out   <name>.zip in the current directory
+
+Compiling also checks the pa/ bodies it carries verbatim, and reports what it
+finds against the file you edited. Anything reported as an error fails the
+compile and nothing is written.
+
+  --allow <CODE>   demote one finding code from error to warning; repeatable.
+                   Still reported, just not fatal -- for when paxc is wrong
+                   about your flow and you would rather ship than wait. Applies
+                   to --check too. An unknown code is rejected rather than
+                   ignored.
 
 Decode mode (round-trip ingest):
   paxc --decode <flow.json|flow.zip> [--out-dir <DIR>]
@@ -60,6 +73,7 @@ fn parse_args() -> Args {
     let mut decode = false;
     let mut check = false;
     let mut out_dir: Option<PathBuf> = None;
+    let mut allow: Vec<String> = Vec::new();
     let mut positional: Vec<String> = Vec::new();
 
     let mut i = 0;
@@ -106,6 +120,23 @@ fn parse_args() -> Args {
                 let Some(v) = argv.get(i) else { usage() };
                 out_dir = Some(PathBuf::from(v));
             }
+            "--allow" => {
+                i += 1;
+                let Some(v) = argv.get(i) else { usage() };
+                // Rejecting an unknown code rather than ignoring it: a
+                // misspelled `--allow` that quietly allows nothing would fail
+                // the build for the reason it was passed to prevent, and the
+                // user would be looking at the finding rather than the flag.
+                if !check::ALL_CODES.contains(&v.as_str()) {
+                    eprintln!("paxc: --allow: no finding code named '{v}'");
+                    if let Some(near) = nearest_code(v) {
+                        eprintln!("       did you mean '{near}'?");
+                    }
+                    eprintln!("       codes: {}", check::ALL_CODES.join(", "));
+                    process::exit(2);
+                }
+                allow.push(v.clone());
+            }
             _ => positional.push(argv[i].clone()),
         }
         i += 1;
@@ -122,7 +153,18 @@ fn parse_args() -> Args {
         decode,
         check,
         out_dir,
+        allow,
     }
+}
+
+/// Closest finding code to a misspelling, for the `--allow` error. Reuses the
+/// same edit-distance helper the expression hints use, so a near miss gets the
+/// same treatment as a mistyped function name.
+fn nearest_code(given: &str) -> Option<&'static str> {
+    check::ALL_CODES
+        .iter()
+        .find(|c| check::expressions::close(given, c))
+        .copied()
 }
 
 fn main() {
@@ -182,7 +224,12 @@ fn main() {
         }
     };
 
-    report_pa_body_findings(&resolved, source_dir);
+    // Before anything is written. A compiler that reports a flow as broken and
+    // then hands over the .zip anyway has told the user their error is
+    // optional.
+    if report_pa_body_findings(&resolved, source_dir, &args.allow) {
+        process::exit(1);
+    }
 
     match args.target {
         None => {
@@ -230,29 +277,45 @@ fn main() {
 /// against the output afterwards and then map a path in generated JSON back to
 /// the file they had edited.
 ///
-/// Warnings, not errors, and the exit status does not move. Every flow that
-/// compiles today still compiles. Promoting these is its own step, taken once
-/// they have been run against real flows rather than only against the corpus.
-///
 /// Rendered through the same ariadne path as a pax compile error, underlining
 /// the line in the `pa/` file rather than naming the file and leaving the
 /// reader to search a connector body several hundred lines deep. When the field
 /// cannot be located in the text — PA defaults some it never wrote down — the
 /// report falls back to naming the file, which is still better than pointing at
 /// an arbitrary line.
-fn report_pa_body_findings(resolved: &resolver::ResolvedProgram, source_dir: Option<&Path>) {
+///
+/// Returns whether anything fatal was found, so the caller can stop before
+/// writing a flow it has just said is broken.
+///
+/// A code named in `--allow` still gets reported, in full, and simply is not
+/// fatal. Silencing it would throw away the signal that made per-code narrower
+/// than a blanket switch: the point is to unblock somebody without also making
+/// the finding invisible to them.
+fn report_pa_body_findings(
+    resolved: &resolver::ResolvedProgram,
+    source_dir: Option<&Path>,
+    allow: &[String],
+) -> bool {
     let sources = emitter::pa_source_map(&resolved.actions);
-    if sources.is_empty() {
-        return;
-    }
     let Ok(findings) = check::check_flow(&emitter::emit(resolved)) else {
         // The shape came straight from the emitter, so it is checkable by
         // construction. If that ever stops being true it is a paxc bug, and
         // failing a compile over it would be the wrong response.
-        return;
+        return false;
     };
-    for attributed in check::attribute_to_sources(findings, &sources, source_dir) {
+    let split = check::attribute_to_sources(findings, &sources, source_dir);
+    let mut fatal = false;
+
+    for attributed in &split.in_pa_bodies {
         let finding = &attributed.finding;
+        let allowed = allow.iter().any(|a| a == finding.code);
+        let severity = if allowed {
+            check::Severity::Warning
+        } else {
+            finding.severity
+        };
+        fatal |= severity == check::Severity::Error;
+
         let message = format!("[{}] {}", finding.code, finding.message);
 
         // Re-reading rather than keeping the bytes from resolve: the file is
@@ -267,13 +330,36 @@ fn report_pa_body_findings(resolved: &resolver::ResolvedProgram, source_dir: Opt
         let mut diagnostic = match check::locate::locate(&text, &attributed.pointer) {
             Some(range) => diagnostic::Diagnostic::at_range(message, range, "here"),
             None => diagnostic::Diagnostic::unspanned(message),
+        };
+        if severity == check::Severity::Warning {
+            diagnostic = diagnostic.as_warning();
         }
-        .as_warning();
         if let Some(note) = &finding.note {
             diagnostic = diagnostic.with_note(note);
         }
+        if allowed {
+            diagnostic = diagnostic.with_note(format!("allowed by --allow {}", finding.code));
+        }
         diagnostic.report(&attributed.display, &text);
     }
+
+    // Findings against JSON paxc wrote itself. The author cannot fix these and
+    // did not cause them, but shipping a flow paxc knows is broken is the worst
+    // available outcome, so they are fatal and they say whose fault it is.
+    // `--allow` deliberately does not reach them: silencing our own bug is not
+    // a thing a user should be able to ask for by accident.
+    for finding in &split.in_generated_output {
+        fatal = true;
+        eprintln!(
+            "paxc: internal: emitted a flow that fails paxc's own checks at {}",
+            finding.path
+        );
+        eprintln!("      [{}] {}", finding.code, finding.message);
+        eprintln!("      this is a paxc bug, not a problem with your source.");
+        eprintln!("      please report it at https://github.com/excelano/paxc/issues");
+    }
+
+    fatal
 }
 
 /// Check an exported flow and report what is wrong with it.
@@ -289,13 +375,23 @@ fn run_check(args: &Args) {
             process::exit(2);
         }
     };
-    let findings = match check::check_flow(&input) {
+    let mut findings = match check::check_flow(&input) {
         Ok(f) => f,
         Err(e) => {
             eprintln!("paxc: cannot check {}: {e}", args.path);
             process::exit(2);
         }
     };
+
+    // `--allow` means the same thing here as it does on a compile. A code you
+    // can wave through in one mode and not the other would be a trap for
+    // anyone running both, which is what a CI job that compiles and checks
+    // does.
+    for finding in &mut findings {
+        if args.allow.iter().any(|a| a == finding.code) {
+            finding.severity = check::Severity::Warning;
+        }
+    }
 
     if findings.is_empty() {
         eprintln!("{}: no problems found", args.path);

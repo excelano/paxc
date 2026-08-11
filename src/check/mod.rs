@@ -23,6 +23,35 @@ pub mod expressions;
 pub mod locate;
 pub mod runafter;
 
+/// Every finding code, so `--allow` can reject a name that does not exist
+/// rather than accepting it and silently allowing nothing.
+///
+/// Maintained by hand — nothing here can enumerate the constants for itself —
+/// and held in the order it prints, so a new code goes in at its alphabetical
+/// place. `all_codes_is_sorted_and_has_no_duplicates` is the guard that a
+/// careless insert fails rather than quietly shipping an unsorted list or the
+/// same code twice. A code missing from here fails differently and more
+/// visibly: `--allow` rejects it as unknown the first time anyone tries.
+pub const ALL_CODES: &[&str] = &[
+    runafter::NOT_OBJECT,
+    expressions::ITEMS_OUTSIDE_LOOP,
+    expressions::UNBALANCED_PARENS,
+    expressions::UNKNOWN_ACTION,
+    expressions::UNKNOWN_FUNCTION,
+    expressions::UNKNOWN_PARAMETER,
+    expressions::UNKNOWN_VARIABLE,
+    expressions::UNTERMINATED_INTERPOLATION,
+    expressions::UNTERMINATED_STRING,
+    runafter::BAD_STATUS,
+    runafter::CROSS_SCOPE,
+    runafter::EMPTY_STATUS,
+    runafter::MALFORMED,
+    runafter::SELF_REFERENCE,
+    runafter::UNKNOWN_TARGET,
+    runafter::UNREACHABLE,
+    runafter::NO_ENTRY,
+];
+
 /// Whether a finding describes a flow that is broken or one that is
 /// suspicious. Errors are things PA will import and then silently fail to
 /// honor; warnings are shapes that are legal but almost certainly not what
@@ -152,8 +181,9 @@ pub fn check_flow(input: &Value) -> Result<Vec<Finding>, CheckError> {
     Ok(findings)
 }
 
-/// Keep the findings that landed inside an opaque `pa/` body and rewrite their
-/// paths to name that file, dropping the rest.
+/// Split findings by whose problem they are: the ones inside an opaque `pa/`
+/// body, with their paths rewritten to name that file, and the ones against
+/// JSON paxc generated itself.
 ///
 /// `sources` is `emitter::pa_source_map` — every opaque action's emit path
 /// paired with the file its body was read from. A finding matches the longest
@@ -161,49 +191,65 @@ pub fn check_flow(input: &Value) -> Result<Vec<Finding>, CheckError> {
 /// `actions/Scope/actions/Send/inputs/to` against a key of
 /// `actions/Scope/actions/Send` reports as `pa/Send.json/inputs/to`.
 ///
-/// Findings that match nothing are dropped rather than reported. Those are
-/// against JSON paxc generated from pax source the resolver already validated,
-/// so one firing means a paxc bug rather than something the author can fix —
-/// telling them to go and edit output they never wrote would be worse than
-/// silence. `emitted_pax_has_nothing_to_report` is what watches for that case.
+/// Nothing is discarded. A finding matching no key goes to
+/// `in_generated_output` with its emit path untouched, because that is what a
+/// bug report needs — the author cannot fix it and did not cause it, but the
+/// flow is still broken and saying nothing would ship it anyway.
 ///
-/// Severity is left alone. Whether these read as warnings or as errors is the
-/// caller's policy, not this function's.
+/// Severity is left alone. Whether these read as warnings or as errors, and
+/// what `--allow` demotes, is the caller's policy rather than this function's.
 pub fn attribute_to_sources(
     findings: Vec<Finding>,
     sources: &BTreeMap<String, PathBuf>,
     relative_to: Option<&Path>,
-) -> Vec<Attributed> {
-    findings
-        .into_iter()
-        .filter_map(|mut finding| {
-            let (key, source) = sources
-                .iter()
-                .filter(|(key, _)| {
-                    finding.path == **key || finding.path.starts_with(&format!("{key}/"))
-                })
-                .max_by_key(|(key, _)| key.len())?;
-            let shown = relative_to
-                .and_then(|base| source.strip_prefix(base).ok())
-                .unwrap_or(source.as_path())
-                .display()
-                .to_string();
-            let pointer = finding.path[key.len()..]
-                .trim_start_matches('/')
-                .to_string();
-            finding.path = if pointer.is_empty() {
-                shown.clone()
-            } else {
-                format!("{shown}/{pointer}")
-            };
-            Some(Attributed {
-                finding,
-                source: source.clone(),
-                display: shown,
-                pointer,
+) -> Attribution {
+    let mut out = Attribution::default();
+    for mut finding in findings {
+        let matched = sources
+            .iter()
+            .filter(|(key, _)| {
+                finding.path == **key || finding.path.starts_with(&format!("{key}/"))
             })
-        })
-        .collect()
+            .max_by_key(|(key, _)| key.len());
+        let Some((key, source)) = matched else {
+            out.in_generated_output.push(finding);
+            continue;
+        };
+        let shown = relative_to
+            .and_then(|base| source.strip_prefix(base).ok())
+            .unwrap_or(source.as_path())
+            .display()
+            .to_string();
+        let pointer = finding.path[key.len()..]
+            .trim_start_matches('/')
+            .to_string();
+        finding.path = if pointer.is_empty() {
+            shown.clone()
+        } else {
+            format!("{shown}/{pointer}")
+        };
+        out.in_pa_bodies.push(Attributed {
+            finding,
+            source: source.clone(),
+            display: shown,
+            pointer,
+        });
+    }
+    out
+}
+
+/// Findings split by whose problem they are.
+#[derive(Debug, Clone, Default)]
+pub struct Attribution {
+    /// Traced back to a `pa/` file, which is something the author wrote and
+    /// can go and fix.
+    pub in_pa_bodies: Vec<Attributed>,
+    /// Against JSON paxc generated from pax source the resolver already
+    /// validated. One of these is a paxc bug rather than the author's, and it
+    /// needs saying rather than dropping: silently shipping a flow paxc knows
+    /// is broken is worse than an alarming message, and phrasing it as our bug
+    /// is what turns an invisible class of emitter defect into a report.
+    pub in_generated_output: Vec<Finding>,
 }
 
 /// A finding that has been traced back to the `pa/` file it came from.
@@ -265,6 +311,50 @@ mod tests {
         json!({"actions": {"A": {"type": "Compose", "runAfter": {}}}})
     }
 
+    /// The list is printed to anyone who mistypes `--allow`, so its order is
+    /// user-facing, and a duplicate would mean a code was added twice while
+    /// looking like it was added once.
+    #[test]
+    fn all_codes_is_sorted_and_has_no_duplicates() {
+        let mut sorted = ALL_CODES.to_vec();
+        sorted.sort_unstable();
+        assert_eq!(
+            ALL_CODES,
+            &sorted[..],
+            "ALL_CODES prints in its declared order; keep it alphabetical"
+        );
+        sorted.dedup();
+        assert_eq!(sorted.len(), ALL_CODES.len(), "a code appears twice");
+    }
+
+    /// Every code the checks raise has to be allowable, or somebody hitting a
+    /// false positive has no lever at all. This covers what a small flow can be
+    /// made to produce; for the rest the backstop is that `--allow` rejects an
+    /// unlisted code loudly the first time anyone reaches for it.
+    #[test]
+    fn codes_the_checks_raise_are_all_allowable() {
+        let broken = json!({"actions": {
+            "A": {"type": "Compose", "runAfter": {"Nope": ["Succeeded"]},
+                  "inputs": "@noSuchFn(variables('undeclared'), parameters('nope'))"},
+            "B": {"type": "Compose", "runAfter": {"B": ["Succeeded"]},
+                  "inputs": "@{items('NotALoop')"}
+        }});
+        let raised = check_flow(&broken).expect("checkable");
+        assert!(
+            raised.len() >= 4,
+            "fixture should exercise several codes, raised {}",
+            raised.len()
+        );
+        for finding in &raised {
+            assert!(
+                ALL_CODES.contains(&finding.code),
+                "`{}` is raised by the checks but missing from ALL_CODES, so \
+                 --allow rejects it as unknown",
+                finding.code
+            );
+        }
+    }
+
     #[test]
     fn accepts_bare_definition() {
         assert!(check_flow(&one_action()).is_ok());
@@ -294,8 +384,12 @@ mod tests {
             &sources(),
             Some(Path::new("/src")),
         );
-        assert_eq!(out.len(), 1);
-        assert_eq!(out[0].finding.path, "pa/Send.json/inputs/parameters/to");
+        assert_eq!(out.in_pa_bodies.len(), 1);
+        assert!(out.in_generated_output.is_empty());
+        assert_eq!(
+            out.in_pa_bodies[0].finding.path,
+            "pa/Send.json/inputs/parameters/to"
+        );
     }
 
     /// The joined path is for printing. The span work needs the file and the
@@ -309,9 +403,12 @@ mod tests {
             &sources(),
             Some(Path::new("/src")),
         );
-        assert_eq!(out[0].source, PathBuf::from("/src/pa/Send.json"));
-        assert_eq!(out[0].display, "pa/Send.json");
-        assert_eq!(out[0].pointer, "inputs/parameters/to");
+        assert_eq!(
+            out.in_pa_bodies[0].source,
+            PathBuf::from("/src/pa/Send.json")
+        );
+        assert_eq!(out.in_pa_bodies[0].display, "pa/Send.json");
+        assert_eq!(out.in_pa_bodies[0].pointer, "inputs/parameters/to");
     }
 
     /// A finding about the action as a whole has no field to point at, and an
@@ -324,7 +421,7 @@ mod tests {
             &sources(),
             Some(Path::new("/src")),
         );
-        assert_eq!(out[0].pointer, "");
+        assert_eq!(out.in_pa_bodies[0].pointer, "");
     }
 
     /// Without a source directory to measure against, the absolute path is all
@@ -332,7 +429,7 @@ mod tests {
     #[test]
     fn with_no_base_the_file_shows_as_it_is() {
         let out = attribute_to_sources(vec![at("actions/Send")], &sources(), None);
-        assert_eq!(out[0].display, "/src/pa/Send.json");
+        assert_eq!(out.in_pa_bodies[0].display, "/src/pa/Send.json");
     }
 
     #[test]
@@ -342,7 +439,7 @@ mod tests {
             &sources(),
             Some(Path::new("/src")),
         );
-        assert_eq!(out[0].finding.path, "pa/Send.json");
+        assert_eq!(out.in_pa_bodies[0].finding.path, "pa/Send.json");
     }
 
     /// A `pa` body can hold actions of its own, so two keys can prefix the same
@@ -360,7 +457,7 @@ mod tests {
             &s,
             Some(Path::new("/src")),
         );
-        assert_eq!(out[0].finding.path, "pa/Inner.json/inputs");
+        assert_eq!(out.in_pa_bodies[0].finding.path, "pa/Inner.json/inputs");
     }
 
     /// `actions/Send` must not claim `actions/Send_an_email`. Matching on the
@@ -374,21 +471,28 @@ mod tests {
             Some(Path::new("/src")),
         );
         assert!(
-            out.is_empty(),
+            out.in_pa_bodies.is_empty(),
             "`actions/Send` must not swallow `actions/Send_an_email`: {out:?}"
         );
     }
 
-    /// Everything paxc emitted from pax source is the resolver's business, and
-    /// reporting it would point the author at generated JSON they never wrote.
+    /// A finding paxc's own output earned is not the author's to fix, so it
+    /// does not get attributed to one of their files. It is not thrown away
+    /// either -- the caller reports it as a paxc bug, because emitting a flow
+    /// paxc knows is broken and saying nothing is the worst of the options.
     #[test]
-    fn a_finding_outside_every_pa_body_is_dropped() {
+    fn a_finding_outside_every_pa_body_is_paxcs_own() {
         let out = attribute_to_sources(
             vec![at("actions/Compose_greeting/inputs")],
             &sources(),
             Some(Path::new("/src")),
         );
-        assert!(out.is_empty());
+        assert!(out.in_pa_bodies.is_empty());
+        assert_eq!(out.in_generated_output.len(), 1);
+        assert_eq!(
+            out.in_generated_output[0].path, "actions/Compose_greeting/inputs",
+            "the untouched emit path is what a bug report needs"
+        );
     }
 
     #[test]
@@ -399,7 +503,7 @@ mod tests {
             Some(Path::new("/src")),
         );
         assert_eq!(
-            out[0].finding.severity,
+            out.in_pa_bodies[0].finding.severity,
             Severity::Error,
             "attribution must not quietly re-rank a finding"
         );
