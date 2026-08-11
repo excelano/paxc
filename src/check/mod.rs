@@ -20,6 +20,7 @@ use std::path::{Path, PathBuf};
 use serde_json::{Map, Value};
 
 pub mod expressions;
+pub mod locate;
 pub mod runafter;
 
 /// Whether a finding describes a flow that is broken or one that is
@@ -172,7 +173,7 @@ pub fn attribute_to_sources(
     findings: Vec<Finding>,
     sources: &BTreeMap<String, PathBuf>,
     relative_to: Option<&Path>,
-) -> Vec<Finding> {
+) -> Vec<Attributed> {
     findings
         .into_iter()
         .filter_map(|mut finding| {
@@ -184,12 +185,45 @@ pub fn attribute_to_sources(
                 .max_by_key(|(key, _)| key.len())?;
             let shown = relative_to
                 .and_then(|base| source.strip_prefix(base).ok())
-                .unwrap_or(source.as_path());
-            let remainder = &finding.path[key.len()..];
-            finding.path = format!("{}{remainder}", shown.display());
-            Some(finding)
+                .unwrap_or(source.as_path())
+                .display()
+                .to_string();
+            let pointer = finding.path[key.len()..]
+                .trim_start_matches('/')
+                .to_string();
+            finding.path = if pointer.is_empty() {
+                shown.clone()
+            } else {
+                format!("{shown}/{pointer}")
+            };
+            Some(Attributed {
+                finding,
+                source: source.clone(),
+                display: shown,
+                pointer,
+            })
         })
         .collect()
+}
+
+/// A finding that has been traced back to the `pa/` file it came from.
+///
+/// The parts are kept apart rather than pre-joined because they are wanted
+/// separately: `source` to read the file, `pointer` to find the span inside it,
+/// `display` to name it. `finding.path` is the three of them joined for the
+/// case where none of that is available and the finding prints as text.
+#[derive(Debug, Clone)]
+pub struct Attributed {
+    pub finding: Finding,
+    /// The file on disk, as the resolver read it.
+    pub source: PathBuf,
+    /// That file as it should be shown — relative to the source directory when
+    /// it sits under one, so a finding reads `pa/Send.json` rather than an
+    /// absolute path meaningful only on this machine.
+    pub display: String,
+    /// Where inside the file, `/`-separated, ready for `locate::locate`. Empty
+    /// when the finding is about the action as a whole.
+    pub pointer: String,
 }
 
 /// Peel whichever wrappers are present and return the definition object —
@@ -261,7 +295,44 @@ mod tests {
             Some(Path::new("/src")),
         );
         assert_eq!(out.len(), 1);
-        assert_eq!(out[0].path, "pa/Send.json/inputs/parameters/to");
+        assert_eq!(out[0].finding.path, "pa/Send.json/inputs/parameters/to");
+    }
+
+    /// The joined path is for printing. The span work needs the file and the
+    /// pointer apart -- one to read, the other to find the line -- and a
+    /// pointer that kept its leading slash or the filename would locate
+    /// nothing.
+    #[test]
+    fn the_file_and_the_pointer_are_kept_separable() {
+        let out = attribute_to_sources(
+            vec![at("actions/Send/inputs/parameters/to")],
+            &sources(),
+            Some(Path::new("/src")),
+        );
+        assert_eq!(out[0].source, PathBuf::from("/src/pa/Send.json"));
+        assert_eq!(out[0].display, "pa/Send.json");
+        assert_eq!(out[0].pointer, "inputs/parameters/to");
+    }
+
+    /// A finding about the action as a whole has no field to point at, and an
+    /// empty pointer is what tells the caller to underline nothing rather than
+    /// guess a line.
+    #[test]
+    fn an_action_level_finding_has_an_empty_pointer() {
+        let out = attribute_to_sources(
+            vec![at("actions/Send")],
+            &sources(),
+            Some(Path::new("/src")),
+        );
+        assert_eq!(out[0].pointer, "");
+    }
+
+    /// Without a source directory to measure against, the absolute path is all
+    /// there is -- worse to read, but never wrong.
+    #[test]
+    fn with_no_base_the_file_shows_as_it_is() {
+        let out = attribute_to_sources(vec![at("actions/Send")], &sources(), None);
+        assert_eq!(out[0].display, "/src/pa/Send.json");
     }
 
     #[test]
@@ -271,7 +342,7 @@ mod tests {
             &sources(),
             Some(Path::new("/src")),
         );
-        assert_eq!(out[0].path, "pa/Send.json");
+        assert_eq!(out[0].finding.path, "pa/Send.json");
     }
 
     /// A `pa` body can hold actions of its own, so two keys can prefix the same
@@ -289,7 +360,7 @@ mod tests {
             &s,
             Some(Path::new("/src")),
         );
-        assert_eq!(out[0].path, "pa/Inner.json/inputs");
+        assert_eq!(out[0].finding.path, "pa/Inner.json/inputs");
     }
 
     /// `actions/Send` must not claim `actions/Send_an_email`. Matching on the
@@ -328,7 +399,7 @@ mod tests {
             Some(Path::new("/src")),
         );
         assert_eq!(
-            out[0].severity,
+            out[0].finding.severity,
             Severity::Error,
             "attribution must not quietly re-rank a finding"
         );

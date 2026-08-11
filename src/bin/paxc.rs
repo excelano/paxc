@@ -233,6 +233,13 @@ fn main() {
 /// Warnings, not errors, and the exit status does not move. Every flow that
 /// compiles today still compiles. Promoting these is its own step, taken once
 /// they have been run against real flows rather than only against the corpus.
+///
+/// Rendered through the same ariadne path as a pax compile error, underlining
+/// the line in the `pa/` file rather than naming the file and leaving the
+/// reader to search a connector body several hundred lines deep. When the field
+/// cannot be located in the text — PA defaults some it never wrote down — the
+/// report falls back to naming the file, which is still better than pointing at
+/// an arbitrary line.
 fn report_pa_body_findings(resolved: &resolver::ResolvedProgram, source_dir: Option<&Path>) {
     let sources = emitter::pa_source_map(&resolved.actions);
     if sources.is_empty() {
@@ -244,9 +251,28 @@ fn report_pa_body_findings(resolved: &resolver::ResolvedProgram, source_dir: Opt
         // failing a compile over it would be the wrong response.
         return;
     };
-    for mut finding in check::attribute_to_sources(findings, &sources, source_dir) {
-        finding.severity = check::Severity::Warning;
-        eprintln!("{finding}");
+    for attributed in check::attribute_to_sources(findings, &sources, source_dir) {
+        let finding = &attributed.finding;
+        let message = format!("[{}] {}", finding.code, finding.message);
+
+        // Re-reading rather than keeping the bytes from resolve: the file is
+        // small, this runs once per finding on a path that is already writing
+        // to a terminal, and a body that vanished mid-compile should degrade to
+        // a plain line rather than take the compile with it.
+        let Ok(text) = fs::read_to_string(&attributed.source) else {
+            eprintln!("{finding}");
+            continue;
+        };
+
+        let mut diagnostic = match check::locate::locate(&text, &attributed.pointer) {
+            Some(range) => diagnostic::Diagnostic::at_range(message, range, "here"),
+            None => diagnostic::Diagnostic::unspanned(message),
+        }
+        .as_warning();
+        if let Some(note) = &finding.note {
+            diagnostic = diagnostic.with_note(note);
+        }
+        diagnostic.report(&attributed.display, &text);
     }
 }
 

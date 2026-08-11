@@ -11,9 +11,23 @@ use chumsky::error::{Rich, RichPattern, RichReason};
 
 use crate::lexer::{Span, Token};
 
+/// Whether a diagnostic stops the compile or merely says something.
+///
+/// Everything the lexer, parser and resolver produce is fatal, so `Error` is
+/// the default and the only kind those paths ever construct. Checks against
+/// `pa/` bodies report through the same renderer without failing the build,
+/// which is what this distinguishes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Kind {
+    #[default]
+    Error,
+    Warning,
+}
+
 /// A single diagnostic to render. `primary` carries the source span to
 /// underline with the main message; `notes` become footer lines.
 pub struct Diagnostic {
+    pub kind: Kind,
     pub message: String,
     pub primary: Option<(Range<usize>, String)>,
     pub notes: Vec<String>,
@@ -22,8 +36,43 @@ pub struct Diagnostic {
 impl Diagnostic {
     pub fn spanned(message: impl Into<String>, span: Span, label: impl Into<String>) -> Self {
         Self {
+            kind: Kind::Error,
             message: message.into(),
             primary: Some((span.start..span.end, label.into())),
+            notes: Vec::new(),
+        }
+    }
+
+    /// Same rendering, without the claim that the build is broken.
+    pub fn as_warning(mut self) -> Self {
+        self.kind = Kind::Warning;
+        self
+    }
+
+    /// A diagnostic over an arbitrary file and byte range, for findings that
+    /// come from somewhere other than pax source — `pa/` bodies, where the
+    /// span is recovered from the raw JSON rather than carried from the lexer.
+    pub fn at_range(
+        message: impl Into<String>,
+        range: Range<usize>,
+        label: impl Into<String>,
+    ) -> Self {
+        Self {
+            kind: Kind::Error,
+            message: message.into(),
+            primary: Some((range, label.into())),
+            notes: Vec::new(),
+        }
+    }
+
+    /// A diagnostic with nothing to underline. Used when a finding names a
+    /// file but its field cannot be located in the text — better to say so
+    /// against the file than to point at an arbitrary line.
+    pub fn unspanned(message: impl Into<String>) -> Self {
+        Self {
+            kind: Kind::Error,
+            message: message.into(),
+            primary: None,
             notes: Vec::new(),
         }
     }
@@ -49,14 +98,19 @@ impl Diagnostic {
 
         let offset = primary_chars.as_ref().map(|(r, _)| r.start).unwrap_or(0);
 
-        let mut builder = Report::build(ReportKind::Error, (filename, offset..offset))
-            .with_message(&self.message);
+        let (report_kind, color) = match self.kind {
+            Kind::Error => (ReportKind::Error, Color::Red),
+            Kind::Warning => (ReportKind::Warning, Color::Yellow),
+        };
+
+        let mut builder =
+            Report::build(report_kind, (filename, offset..offset)).with_message(&self.message);
 
         if let Some((range, label)) = &primary_chars {
             builder = builder.with_label(
                 Label::new((filename, range.clone()))
                     .with_message(label)
-                    .with_color(Color::Red),
+                    .with_color(color),
             );
         }
 
@@ -132,11 +186,7 @@ pub fn from_parse_error<'src>(err: &Rich<'_, Token<'src>, Span>) -> Diagnostic {
 pub fn from_interpret_error(err: &crate::interpreter::InterpretError) -> Diagnostic {
     match err.span {
         Some(span) => Diagnostic::spanned(format!("runtime error: {}", err.message), span, "here"),
-        None => Diagnostic {
-            message: format!("runtime error: {}", err.message),
-            primary: None,
-            notes: Vec::new(),
-        },
+        None => Diagnostic::unspanned(format!("runtime error: {}", err.message)),
     }
 }
 
