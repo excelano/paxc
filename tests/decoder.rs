@@ -799,3 +799,97 @@ fn function_name_casing_survives_the_round_trip() {
         drifted.join("\n")
     );
 }
+
+/// PA's `concat` is variadic; pax's `&` is binary. The decoder rewrites the
+/// former into the latter because it reads better, so the emitter has to put
+/// the arity back or every `concat` in a decoded flow returns nested and shows
+/// up as a diff nobody made.
+///
+/// The mixed case is here to pin the boundary: a chain carrying literal text
+/// leaves as PA's template form, not as `concat` at all, and flattening must
+/// not disturb that.
+#[test]
+fn variadic_concat_keeps_its_arity_through_the_round_trip() {
+    use serde_json::json;
+
+    let cases = [
+        ("Two", "@concat(outputs('Compose_a'), outputs('Compose_b'))"),
+        (
+            "Three",
+            "@concat(outputs('Compose_a'), outputs('Compose_b'), outputs('Compose_c'))",
+        ),
+        (
+            "Six",
+            "@concat(outputs('Compose_a'), outputs('Compose_b'), outputs('Compose_c'), \
+             outputs('Compose_a'), outputs('Compose_b'), outputs('Compose_c'))",
+        ),
+        ("Mixed", "x@{outputs('Compose_a')}y@{outputs('Compose_b')}z"),
+    ];
+
+    let mut actions = serde_json::Map::new();
+    let mut prev: Option<String> = None;
+    for seed in ["a", "b", "c"] {
+        let key = format!("Compose_{seed}");
+        let run_after = match &prev {
+            Some(p) => json!({ p.clone(): ["Succeeded"] }),
+            None => json!({}),
+        };
+        actions.insert(
+            key.clone(),
+            json!({ "type": "Compose", "runAfter": run_after, "inputs": seed }),
+        );
+        prev = Some(key);
+    }
+    for (label, expr) in &cases {
+        let key = format!("Compose_{label}");
+        let run_after = json!({ prev.clone().unwrap(): ["Succeeded"] });
+        actions.insert(
+            key.clone(),
+            json!({ "type": "Compose", "runAfter": run_after, "inputs": expr }),
+        );
+        prev = Some(key);
+    }
+
+    let input = json!({
+        "properties": {
+            "displayName": "Variadic Concat",
+            "definition": {
+                "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+                "contentVersion": "1.0.0.0",
+                "triggers": { "manual": { "type": "Request", "kind": "Button", "inputs": {} } },
+                "actions": actions
+            }
+        }
+    });
+
+    let dir = tmp_dir("variadic_concat");
+    let input_path = dir.join("input.json");
+    fs::write(&input_path, serde_json::to_vec_pretty(&input).unwrap()).unwrap();
+
+    let report = decoder::decode_file(&input_path, &dir).expect("decode");
+    assert!(
+        report.warnings.is_empty(),
+        "every concat here is lowerable, but the decoder fell back: {:?}",
+        report.warnings
+    );
+
+    let reemitted = compile_pax_to_definition(&dir.join("input.pax"));
+    let emitted = reemitted["definition"]["actions"]
+        .as_object()
+        .expect("actions object");
+    let drifted: Vec<String> = cases
+        .iter()
+        .filter(|(label, expr)| emitted[&format!("Compose_{label}")]["inputs"] != json!(expr))
+        .map(|(label, expr)| {
+            format!(
+                "{label}: expected {expr:?}, got {:?}",
+                emitted[&format!("Compose_{label}")]["inputs"]
+            )
+        })
+        .collect();
+    assert!(
+        drifted.is_empty(),
+        "a `&` chain must re-emit as one n-ary concat, not a nested one:\n{}",
+        drifted.join("\n")
+    );
+}

@@ -553,8 +553,23 @@ fn pa_expr(expr: &Expr) -> String {
             if let BinOp::NotEquals = op {
                 return format!("not(equals({}, {}))", pa_expr(lhs), pa_expr(rhs));
             }
+            // `&` is binary in pax; `concat` is variadic in PA. Emitting the
+            // parse tree as it stands writes `concat(concat(concat(a, b), c), d)`
+            // where PA wrote `concat(a, b, c, d)` -- the same string at run time,
+            // and a spurious diff on every round trip, because the decoder
+            // rewrites PA's `concat` into `&` chaining to keep decoded pax
+            // readable. Flattening here restores the shape the chain arrived in
+            // without giving up that rewrite.
+            //
+            // Only `&` chains flatten. An author who writes `concat(a, concat(b, c))`
+            // by hand builds an `Expr::Call`, which this never sees, so their
+            // nesting is preserved as written.
+            if let BinOp::Concat = op {
+                let parts: Vec<String> = flatten_concat(expr).iter().map(|p| pa_expr(p)).collect();
+                return format!("concat({})", parts.join(", "));
+            }
             let fn_name = match op {
-                BinOp::Concat => "concat",
+                BinOp::Concat => unreachable!("handled above"),
                 BinOp::Add => "add",
                 BinOp::Sub => "sub",
                 BinOp::Mul => "mul",
