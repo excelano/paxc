@@ -1804,6 +1804,60 @@ on succeeded work {
         );
     }
 
+    /// `attribute_to_sources` drops findings that fall outside every `pa/` body,
+    /// on the grounds that pax source is the resolver's business and the author
+    /// cannot edit generated JSON anyway. That reasoning only holds while the
+    /// emitter's own output is genuinely clean, so this is the thing that
+    /// watches it: a finding here is a paxc bug that would otherwise be
+    /// swallowed at the exact moment it started happening.
+    ///
+    /// No `pa` actions, deliberately — this is about what paxc writes itself.
+    #[test]
+    fn emitted_pax_has_nothing_to_report() {
+        let out = compile(
+            r#"var total: int = 0
+var names: array = []
+var flag: bool = true
+var label: string = "start"
+let greeting = "Hello " & label
+let joined = concat(label, label, label)
+if flag && total < 10 {
+  total += 1
+  label = "hit " & greeting
+} else {
+  total -= 1
+}
+foreach n in names {
+  label = label & "x"
+}
+scope work {
+  let inner = greeting & label
+}
+until total > 5 {
+  total += 1
+}
+switch label {
+  case "start" {
+    let a = joined
+  }
+  default {
+    let b = joined
+  }
+}"#,
+        );
+        let findings = crate::check::check_flow(&out).expect("emitted flow must be checkable");
+        assert!(
+            findings.is_empty(),
+            "paxc emitted a flow its own checks object to, which means those \
+             findings are being dropped as unattributable instead of fixed:\n{}",
+            findings
+                .iter()
+                .map(|f| f.to_string())
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+    }
+
     /// The emit key is not the file stem whenever `pa/flow.json` renames it on
     /// the way out, which is the round-trip path's normal state. Attribution
     /// has to survive that or it points at a file nobody has.

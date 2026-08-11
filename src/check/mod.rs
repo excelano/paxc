@@ -13,7 +13,9 @@
 //! spans into pax source text, and there is no pax source here. A finding
 //! carries a JSON path instead.
 
+use std::collections::BTreeMap;
 use std::fmt;
+use std::path::{Path, PathBuf};
 
 use serde_json::{Map, Value};
 
@@ -149,6 +151,47 @@ pub fn check_flow(input: &Value) -> Result<Vec<Finding>, CheckError> {
     Ok(findings)
 }
 
+/// Keep the findings that landed inside an opaque `pa/` body and rewrite their
+/// paths to name that file, dropping the rest.
+///
+/// `sources` is `emitter::pa_source_map` — every opaque action's emit path
+/// paired with the file its body was read from. A finding matches the longest
+/// key that prefixes its path, and what remains is a pointer within that file:
+/// `actions/Scope/actions/Send/inputs/to` against a key of
+/// `actions/Scope/actions/Send` reports as `pa/Send.json/inputs/to`.
+///
+/// Findings that match nothing are dropped rather than reported. Those are
+/// against JSON paxc generated from pax source the resolver already validated,
+/// so one firing means a paxc bug rather than something the author can fix —
+/// telling them to go and edit output they never wrote would be worse than
+/// silence. `emitted_pax_has_nothing_to_report` is what watches for that case.
+///
+/// Severity is left alone. Whether these read as warnings or as errors is the
+/// caller's policy, not this function's.
+pub fn attribute_to_sources(
+    findings: Vec<Finding>,
+    sources: &BTreeMap<String, PathBuf>,
+    relative_to: Option<&Path>,
+) -> Vec<Finding> {
+    findings
+        .into_iter()
+        .filter_map(|mut finding| {
+            let (key, source) = sources
+                .iter()
+                .filter(|(key, _)| {
+                    finding.path == **key || finding.path.starts_with(&format!("{key}/"))
+                })
+                .max_by_key(|(key, _)| key.len())?;
+            let shown = relative_to
+                .and_then(|base| source.strip_prefix(base).ok())
+                .unwrap_or(source.as_path());
+            let remainder = &finding.path[key.len()..];
+            finding.path = format!("{}{remainder}", shown.display());
+            Some(finding)
+        })
+        .collect()
+}
+
 /// Peel whichever wrappers are present and return the definition object —
 /// the level holding `actions`, and also `triggers` and `parameters`, both
 /// of which the expression checks resolve references against.
@@ -191,6 +234,104 @@ mod tests {
     #[test]
     fn accepts_bare_definition() {
         assert!(check_flow(&one_action()).is_ok());
+    }
+
+    fn sources() -> BTreeMap<String, PathBuf> {
+        BTreeMap::from([
+            (
+                "actions/Send".to_string(),
+                PathBuf::from("/src/pa/Send.json"),
+            ),
+            (
+                "actions/Scope/actions/Inner".to_string(),
+                PathBuf::from("/src/pa/Inner.json"),
+            ),
+        ])
+    }
+
+    fn at(path: &str) -> Finding {
+        Finding::error("x-code", path, "message")
+    }
+
+    #[test]
+    fn a_finding_inside_a_pa_body_names_the_file_and_keeps_the_rest_as_a_pointer() {
+        let out = attribute_to_sources(
+            vec![at("actions/Send/inputs/parameters/to")],
+            &sources(),
+            Some(Path::new("/src")),
+        );
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].path, "pa/Send.json/inputs/parameters/to");
+    }
+
+    #[test]
+    fn a_finding_on_the_action_itself_is_just_the_file() {
+        let out = attribute_to_sources(
+            vec![at("actions/Send")],
+            &sources(),
+            Some(Path::new("/src")),
+        );
+        assert_eq!(out[0].path, "pa/Send.json");
+    }
+
+    /// A `pa` body can hold actions of its own, so two keys can prefix the same
+    /// finding. The deeper one owns it -- picking the shorter would blame the
+    /// enclosing file for something in a nested one.
+    #[test]
+    fn the_longest_matching_key_wins() {
+        let mut s = sources();
+        s.insert(
+            "actions/Scope".to_string(),
+            PathBuf::from("/src/pa/Scope.json"),
+        );
+        let out = attribute_to_sources(
+            vec![at("actions/Scope/actions/Inner/inputs")],
+            &s,
+            Some(Path::new("/src")),
+        );
+        assert_eq!(out[0].path, "pa/Inner.json/inputs");
+    }
+
+    /// `actions/Send` must not claim `actions/Send_an_email`. Matching on the
+    /// raw string prefix without requiring a separator would do exactly that,
+    /// and PA action names sharing a prefix is completely ordinary.
+    #[test]
+    fn a_partial_segment_is_not_a_match() {
+        let out = attribute_to_sources(
+            vec![at("actions/Send_an_email/inputs")],
+            &sources(),
+            Some(Path::new("/src")),
+        );
+        assert!(
+            out.is_empty(),
+            "`actions/Send` must not swallow `actions/Send_an_email`: {out:?}"
+        );
+    }
+
+    /// Everything paxc emitted from pax source is the resolver's business, and
+    /// reporting it would point the author at generated JSON they never wrote.
+    #[test]
+    fn a_finding_outside_every_pa_body_is_dropped() {
+        let out = attribute_to_sources(
+            vec![at("actions/Compose_greeting/inputs")],
+            &sources(),
+            Some(Path::new("/src")),
+        );
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn severity_is_the_callers_business_not_this_functions() {
+        let out = attribute_to_sources(
+            vec![at("actions/Send")],
+            &sources(),
+            Some(Path::new("/src")),
+        );
+        assert_eq!(
+            out[0].severity,
+            Severity::Error,
+            "attribution must not quietly re-rank a finding"
+        );
     }
 
     #[test]

@@ -182,6 +182,8 @@ fn main() {
         }
     };
 
+    report_pa_body_findings(&resolved, source_dir);
+
     match args.target {
         None => {
             let json = emitter::emit(&resolved);
@@ -215,6 +217,36 @@ fn main() {
                 eprintln!("note: dropped {dropped} debug() statement{plural}");
             }
         }
+    }
+}
+
+/// Run the flow checks over what this compile is about to produce, and report
+/// whatever landed inside a `pa/` body.
+///
+/// paxc validates pax source and, until now, took `pa/` bodies entirely on
+/// trust: a reference to an action that does not exist and a misspelled PA
+/// function both compiled clean and failed at run time in the tenant. The
+/// checks could already see them, but only if the user thought to run `--check`
+/// against the output afterwards and then map a path in generated JSON back to
+/// the file they had edited.
+///
+/// Warnings, not errors, and the exit status does not move. Every flow that
+/// compiles today still compiles. Promoting these is its own step, taken once
+/// they have been run against real flows rather than only against the corpus.
+fn report_pa_body_findings(resolved: &resolver::ResolvedProgram, source_dir: Option<&Path>) {
+    let sources = emitter::pa_source_map(&resolved.actions);
+    if sources.is_empty() {
+        return;
+    }
+    let Ok(findings) = check::check_flow(&emitter::emit(resolved)) else {
+        // The shape came straight from the emitter, so it is checkable by
+        // construction. If that ever stops being true it is a paxc bug, and
+        // failing a compile over it would be the wrong response.
+        return;
+    };
+    for mut finding in check::attribute_to_sources(findings, &sources, source_dir) {
+        finding.severity = check::Severity::Warning;
+        eprintln!("{finding}");
     }
 }
 
