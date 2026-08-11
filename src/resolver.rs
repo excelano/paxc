@@ -121,6 +121,13 @@ pub enum ActionKind {
     /// missing-file or malformed-JSON failure surfaces with a span.
     Pa {
         body_json: JsonValue,
+        /// The file the body came from, kept so a finding against the
+        /// emitted flow can name the file the author edits rather than a
+        /// path into generated JSON. Not derivable from the action's emit
+        /// name: `pa/flow.json`'s `actionNameMap` can rename the key on the
+        /// way out (`Send_an_email_V2` → `Send_an_email_(V2)`), and
+        /// `unique_name` can suffix it on top of that.
+        source_path: PathBuf,
     },
     Condition {
         condition: Expr,
@@ -820,7 +827,14 @@ fn resolve_statements(
                     .unwrap_or_else(|| name.clone());
                 let action_name = unique_name(&raw_name, name_counts);
                 named_scopes.insert(name.clone(), action_name.clone());
-                (action_name, ActionKind::Pa { body_json }, *span)
+                (
+                    action_name,
+                    ActionKind::Pa {
+                        body_json,
+                        source_path: path,
+                    },
+                    *span,
+                )
             }
             Stmt::If {
                 condition,

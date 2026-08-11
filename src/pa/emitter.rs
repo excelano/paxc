@@ -11,6 +11,8 @@ use crate::resolver::{
     ActionKind, ResolvedAction, ResolvedProgram, ResolvedSwitchCase, ResolvedTrigger, RunAfterEntry,
 };
 use serde_json::{Map, Value, json};
+use std::collections::BTreeMap;
+use std::path::PathBuf;
 
 const SCHEMA_URL: &str = "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#";
 
@@ -42,6 +44,71 @@ fn build_actions_map(actions: &[ResolvedAction]) -> Value {
         map.insert(action.name.clone(), emit_action(action));
     }
     Value::Object(map)
+}
+
+/// Where each opaque action's body came from, keyed by that action's path in
+/// the emitted definition — `actions/For_each/actions/Send_an_email`, the same
+/// shape `check` builds its finding paths from.
+///
+/// The point is to turn a finding against generated JSON back into the file the
+/// author edits. A `pa` body can itself contain nested actions, so a finding may
+/// land deeper than the key here; the caller wants the longest key that prefixes
+/// the finding's path, and whatever remains after it is a pointer *within* that
+/// file.
+///
+/// Paths are built by mirroring the container keys `build_actions_map` emits
+/// into. That is duplicated knowledge and would drift silently, so
+/// `every_pa_source_path_resolves_in_the_emitted_flow` walks the emitted
+/// document and fails if any key here does not land on an object.
+pub fn pa_source_map(actions: &[ResolvedAction]) -> BTreeMap<String, PathBuf> {
+    let mut out = BTreeMap::new();
+    collect_pa_sources(actions, "actions", &mut out);
+    out
+}
+
+fn collect_pa_sources(
+    actions: &[ResolvedAction],
+    prefix: &str,
+    out: &mut BTreeMap<String, PathBuf>,
+) {
+    for action in actions {
+        if matches!(action.kind, ActionKind::Debug { .. }) {
+            continue;
+        }
+        let path = format!("{prefix}/{}", action.name);
+        match &action.kind {
+            ActionKind::Pa { source_path, .. } => {
+                out.insert(path, source_path.clone());
+            }
+            ActionKind::Condition {
+                true_branch,
+                false_branch,
+                ..
+            } => {
+                collect_pa_sources(true_branch, &format!("{path}/actions"), out);
+                collect_pa_sources(false_branch, &format!("{path}/else/actions"), out);
+            }
+            ActionKind::Foreach { body, .. }
+            | ActionKind::Scope { body, .. }
+            | ActionKind::Until { body, .. }
+            | ActionKind::OnHandler { body, .. } => {
+                collect_pa_sources(body, &format!("{path}/actions"), out);
+            }
+            ActionKind::Switch { cases, default, .. } => {
+                for case in cases {
+                    collect_pa_sources(
+                        &case.body,
+                        &format!("{path}/cases/{}/actions", case.action_name),
+                        out,
+                    );
+                }
+                if let Some(default) = default {
+                    collect_pa_sources(default, &format!("{path}/default/actions"), out);
+                }
+            }
+            _ => {}
+        }
+    }
 }
 
 /// Recursively counts `debug()` statements in a resolved program so paxc can
@@ -119,7 +186,7 @@ fn emit_action(action: &ResolvedAction) -> Value {
             emit_mutation(action::APPEND_TO_ARRAY_VARIABLE, var, value)
         }
         ActionKind::Compose { value, .. } => emit_compose(value),
-        ActionKind::Pa { body_json } => body_json.clone(),
+        ActionKind::Pa { body_json, .. } => body_json.clone(),
         ActionKind::Condition {
             condition,
             true_branch,
@@ -706,6 +773,23 @@ mod tests {
         let fixtures = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
         let resolved = resolve(&program, Some(&fixtures)).expect("resolve failed");
         emit(&resolved)
+    }
+
+    /// Same pipeline as `compile`, but hands back the attribution map beside
+    /// the emitted flow so a test can check one against the other.
+    fn compile_with_pa_sources(src: &str) -> (Value, BTreeMap<String, PathBuf>) {
+        let tokens = lexer().parse(src).into_result().expect("lex failed");
+        let program = parser()
+            .parse(
+                tokens
+                    .as_slice()
+                    .map((src.len()..src.len()).into(), |(t, s)| (t, s)),
+            )
+            .into_result()
+            .expect("parse failed");
+        let fixtures = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+        let resolved = resolve(&program, Some(&fixtures)).expect("resolve failed");
+        (emit(&resolved), pa_source_map(&resolved.actions))
     }
 
     #[test]
@@ -1632,5 +1716,117 @@ switch n {
         let action = &out["definition"]["actions"]["Terminate"];
         assert_eq!(action["inputs"]["runStatus"], "Cancelled");
         assert!(action["inputs"].get("runError").is_none());
+    }
+
+    /// Walk `definition` by a `/`-separated path and return what is there.
+    fn at<'a>(definition: &'a Value, path: &str) -> Option<&'a Value> {
+        path.split('/')
+            .try_fold(definition, |node, segment| node.get(segment))
+    }
+
+    /// `pa_source_map` mirrors the container keys `build_actions_map` emits
+    /// into, which is knowledge held in two places. This is what stops the two
+    /// drifting: every path the map claims has to land on an object in the flow
+    /// that was actually emitted. A new nesting kind that the map forgets shows
+    /// up here as a missing path rather than as a finding attributed to the
+    /// wrong file six months later.
+    #[test]
+    fn every_pa_source_path_resolves_in_the_emitted_flow() {
+        // Four `pa` fixtures exist and the resolver rejects a duplicate
+        // `pa <Name>`, so the nesting kinds are covered across two programs
+        // rather than crammed into one.
+        let programs = [
+            r#"var flag: bool = true
+var items: array = []
+if flag {
+  pa foo
+} else {
+  pa Bar
+}
+foreach it in items {
+  pa HTTP_Call
+}
+scope work {
+  pa Send_Email
+}"#,
+            r#"var status: string = "active"
+var n: int = 0
+switch status {
+  case "active" {
+    pa foo
+  }
+  default {
+    pa Bar
+  }
+}
+until n > 5 {
+  pa HTTP_Call
+}
+scope work {
+}
+on succeeded work {
+  pa Send_Email
+}"#,
+        ];
+
+        let mut total = 0;
+        for src in programs {
+            let (out, map) = compile_with_pa_sources(src);
+            let definition = &out["definition"];
+            assert!(
+                !map.is_empty(),
+                "a program with four `pa` actions produced an empty source map"
+            );
+            for (path, source) in &map {
+                let node = at(definition, path).unwrap_or_else(|| {
+                    panic!(
+                        "`{path}` is in the source map but resolves to nothing in the emitted \
+                         flow — a nesting kind changed shape and the map was not updated.\n\
+                         emitted: {}",
+                        serde_json::to_string_pretty(definition).unwrap()
+                    )
+                });
+                assert!(
+                    node.is_object(),
+                    "`{path}` resolves to {node} rather than an action object"
+                );
+                assert!(
+                    source.is_file(),
+                    "`{path}` is attributed to {}, which is not a file",
+                    source.display()
+                );
+            }
+            total += map.len();
+        }
+        assert_eq!(
+            total, 8,
+            "eight `pa` actions were written across the two programs; the map found {total}"
+        );
+    }
+
+    /// The emit key is not the file stem whenever `pa/flow.json` renames it on
+    /// the way out, which is the round-trip path's normal state. Attribution
+    /// has to survive that or it points at a file nobody has.
+    #[test]
+    fn source_map_survives_an_action_name_override() {
+        let (out, map) = compile_with_pa_sources("pa Send_Email");
+        let emitted_key = out["definition"]["actions"]
+            .as_object()
+            .expect("actions object")
+            .keys()
+            .next()
+            .expect("one action")
+            .clone();
+        let (path, source) = map.iter().next().expect("one mapped action");
+        assert_eq!(
+            path,
+            &format!("actions/{emitted_key}"),
+            "the map must key on the emitted action name"
+        );
+        assert_eq!(
+            source.file_stem().and_then(|s| s.to_str()),
+            Some("Send_Email"),
+            "and still point at the file the body was read from"
+        );
     }
 }
