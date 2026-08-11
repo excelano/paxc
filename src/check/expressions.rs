@@ -54,6 +54,19 @@ pub const UNKNOWN_FUNCTION: &str = "expr-unknown-function";
 /// swept up as expression text belonging to the parent.
 const CONTAINER_KEYS: &[&str] = &["actions", "else", "cases", "default"];
 
+/// Parameters PA supplies rather than the author declaring them. Every
+/// connector action carries `@parameters('$authentication')`, and `$connections`
+/// keys the connection map, but a definition is only obliged to declare them
+/// when it is a complete export — paxc's packager writes both in, while a bare
+/// emitted definition or a hand-assembled fragment has neither and is still
+/// correct. Demanding a declaration reported every connector action in the
+/// corpus, which is how this was found.
+///
+/// Listed rather than matched on the `$` prefix. `$` marking a system parameter
+/// is a convention observed in exports, not a rule anything documents, and
+/// inventing the general form would silently excuse a genuine typo.
+const PA_SUPPLIED_PARAMETERS: &[&str] = &["$authentication", "$connections"];
+
 /// Action types that name the variable they mutate in `inputs.name` rather
 /// than through an expression. Renaming a variable at its declaration
 /// breaks these exactly as silently as it breaks a `variables('...')`
@@ -112,6 +125,9 @@ pub fn check(definition: &Map<String, Value>) -> Vec<Finding> {
     if let Some(params) = definition.get("parameters").and_then(Value::as_object) {
         declared.parameters.extend(params.keys().cloned());
     }
+    declared
+        .parameters
+        .extend(PA_SUPPLIED_PARAMETERS.iter().map(|p| p.to_string()));
     // A trigger is a legitimate target for `outputs('<trigger name>')`, so
     // it belongs in the same set as the actions.
     if let Some(triggers) = definition.get("triggers").and_then(Value::as_object) {
@@ -738,6 +754,35 @@ mod tests {
 
     fn codes(f: &[Finding]) -> Vec<&str> {
         f.iter().map(|f| f.code).collect()
+    }
+
+    /// A complete export declares `$authentication` and `$connections`, but a
+    /// bare emitted definition does not, and both are correct — PA supplies
+    /// them. Every connector action in the corpus references `$authentication`,
+    /// so treating it as undeclared reported all of them.
+    #[test]
+    fn pa_supplied_parameters_need_no_declaration() {
+        let out = run(json!({"actions": {
+            "Call": {"type": "OpenApiConnection", "runAfter": {},
+                     "inputs": {"authentication": "@parameters('$authentication')",
+                                "host": {"connection": {"name": "@parameters('$connections')['x']['connectionId']"}}}}
+        }}));
+        assert!(
+            out.is_empty(),
+            "PA supplies these; a definition that omits the declaration is still \
+             correct: {out:?}"
+        );
+    }
+
+    /// The exemption is a two-name list, not a rule about `$`. A parameter that
+    /// merely looks system-ish is still a typo worth reporting.
+    #[test]
+    fn a_dollar_prefix_alone_does_not_excuse_an_undeclared_parameter() {
+        let out = run(json!({"actions": {
+            "C": {"type": "Compose", "runAfter": {},
+                  "inputs": "@parameters('$notARealSystemParameter')"}
+        }}));
+        assert_eq!(codes(&out), vec![UNKNOWN_PARAMETER]);
     }
 
     fn with_var(name: &str, body: Value) -> Value {
