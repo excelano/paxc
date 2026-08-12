@@ -4,12 +4,73 @@
 //! `Diagnostic` for consistent presentation: colored header, filename and
 //! line:col, source line with the offending span underlined, short label.
 
+use std::io::IsTerminal;
 use std::ops::Range;
+use std::sync::OnceLock;
 
-use ariadne::{Color, Label, Report, ReportKind, Source};
+use ariadne::{CharSet, Color, Config, Label, Report, ReportKind, Source};
 use chumsky::error::{Rich, RichPattern, RichReason};
 
 use crate::lexer::{Span, Token};
+
+/// When to colourise a diagnostic.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ColorChoice {
+    /// Colour for a terminal, plain when piped or read by a program. Honours `NO_COLOR`.
+    #[default]
+    Auto,
+    Always,
+    Never,
+}
+
+impl ColorChoice {
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "auto" => Some(Self::Auto),
+            "always" => Some(Self::Always),
+            "never" => Some(Self::Never),
+            _ => None,
+        }
+    }
+}
+
+static COLOR: OnceLock<ColorChoice> = OnceLock::new();
+
+/// Record what `--color` asked for. Called once from `main`; a path that never calls it
+/// still renders correctly, because [`ColorChoice::Auto`] is the default and it inspects
+/// the environment rather than assuming a terminal.
+pub fn init_color(choice: ColorChoice) {
+    let _ = COLOR.set(choice);
+}
+
+/// Whether this process colourises. `always` beats `NO_COLOR` on purpose: a caller who
+/// named the flag has said what they want, and overriding them there would be the bug.
+fn use_color() -> bool {
+    match COLOR.get().copied().unwrap_or_default() {
+        ColorChoice::Always => true,
+        ColorChoice::Never => false,
+        ColorChoice::Auto => {
+            let suppressed = std::env::var_os("NO_COLOR").is_some_and(|v| !v.is_empty());
+            !suppressed && std::io::stderr().is_terminal()
+        }
+    }
+}
+
+/// The render settings for one diagnostic.
+///
+/// Box-drawing follows the terminal rather than `--color`, because the reason to draw a
+/// diagnostic out of `─┬─` and `╰──` is that someone is looking at it. Piped into a program,
+/// the Unicode adds width and nothing else, so it drops to ASCII even under `--color always`.
+fn render_config() -> Config {
+    let charset = if std::io::stderr().is_terminal() {
+        CharSet::Unicode
+    } else {
+        CharSet::Ascii
+    };
+    Config::default()
+        .with_color(use_color())
+        .with_char_set(charset)
+}
 
 /// Whether a diagnostic stops the compile or merely says something.
 ///
@@ -103,8 +164,9 @@ impl Diagnostic {
             Kind::Warning => (ReportKind::Warning, Color::Yellow),
         };
 
-        let mut builder =
-            Report::build(report_kind, (filename, offset..offset)).with_message(&self.message);
+        let mut builder = Report::build(report_kind, (filename, offset..offset))
+            .with_config(render_config())
+            .with_message(&self.message);
 
         if let Some((range, label)) = &primary_chars {
             builder = builder.with_label(

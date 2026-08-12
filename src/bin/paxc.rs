@@ -15,11 +15,15 @@ struct Args {
     /// Finding codes demoted from error to warning. Still reported, still
     /// visible — just not fatal.
     allow: Vec<String>,
+    color: diagnostic::ColorChoice,
 }
 
 /// paxc's own flags. The shared tail is appended at use.
 const USAGE_HEAD: &str = "\
 usage: paxc [--target <pa-legacy>] [--name <NAME>] [--out <PATH>] [--allow <CODE>] <file.pax>
+
+<file.pax> may be `-`, which reads the source from stdin. The pa/ folder is then
+looked for in the current directory, since there is no source file to sit beside.
 
 With no --target: writes the Power Automate flow definition JSON to stdout.
 With --target pa-legacy: writes a legacy PA import package (.zip). Defaults:
@@ -30,6 +34,7 @@ Compiling also checks the pa/ bodies it carries verbatim, and reports what it
 finds against the file you edited. Anything reported as an error fails the
 compile and nothing is written.
 
+  --list-codes     print every finding code, one per line, and exit
   --allow <CODE>   demote one finding code from error to warning; repeatable.
                    Still reported, just not fatal -- for when paxc is wrong
                    about your flow and you would rather ship than wait. Applies
@@ -74,6 +79,7 @@ fn parse_args() -> Args {
     let mut check = false;
     let mut out_dir: Option<PathBuf> = None;
     let mut allow: Vec<String> = Vec::new();
+    let mut color = diagnostic::ColorChoice::default();
     let mut positional: Vec<String> = Vec::new();
 
     let mut i = 0;
@@ -137,6 +143,33 @@ fn parse_args() -> Args {
                 }
                 allow.push(v.clone());
             }
+            "--list-codes" => {
+                for code in check::ALL_CODES {
+                    println!("{code}");
+                }
+                process::exit(0);
+            }
+            "--color" => {
+                i += 1;
+                let Some(v) = argv.get(i) else { usage() };
+                let Some(c) = diagnostic::ColorChoice::parse(v) else {
+                    eprintln!("paxc: --color: expected auto, always, or never, not '{v}'");
+                    process::exit(2);
+                };
+                color = c;
+            }
+            // A lone `-` is stdin, a positional. Anything else that leads with `-` is a
+            // flag this build does not have: rejecting it beats the old behaviour of
+            // taking it for a filename, which reported a missing file and sent the
+            // caller looking at the disk instead of at the command.
+            other if other.starts_with('-') && other != "-" => {
+                eprintln!("paxc: unknown flag '{other}'");
+                if let Some(near) = nearest_flag(other) {
+                    eprintln!("       did you mean '{near}'?");
+                }
+                eprintln!("       see paxc --help");
+                process::exit(2);
+            }
             _ => positional.push(argv[i].clone()),
         }
         i += 1;
@@ -154,7 +187,54 @@ fn parse_args() -> Args {
         check,
         out_dir,
         allow,
+        color,
     }
+}
+
+/// Read the pax source from a path, or from stdin when the path is `-`.
+///
+/// `-` is the Unix spelling of "this argument is stdin"; without it a caller who writes it
+/// gets a missing-file error naming a file they never meant to open.
+fn read_source(path: &str) -> std::io::Result<String> {
+    if path == "-" {
+        let mut buf = String::new();
+        std::io::Read::read_to_string(&mut std::io::stdin(), &mut buf)?;
+        Ok(buf)
+    } else {
+        fs::read_to_string(path)
+    }
+}
+
+/// How to name the input in a message: `-` is stdin, and saying so beats printing a dash.
+fn display_path(path: &str) -> &str {
+    if path == "-" { "stdin" } else { path }
+}
+
+/// Every flag paxc accepts, for the unknown-flag hint.
+const ALL_FLAGS: [&str; 13] = [
+    "--help",
+    "--version",
+    "--install-skill",
+    "--uninstall-skill",
+    "--target",
+    "--name",
+    "--out",
+    "--decode",
+    "--check",
+    "--out-dir",
+    "--allow",
+    "--list-codes",
+    "--color",
+];
+
+/// Closest known flag to a misspelling. Reuses the edit-distance helper behind the
+/// `--allow` hint, so a mistyped flag gets the same treatment as a mistyped code.
+fn nearest_flag(given: &str) -> Option<&'static str> {
+    let bare = given.trim_start_matches('-');
+    ALL_FLAGS
+        .iter()
+        .find(|f| check::expressions::close(bare, f.trim_start_matches('-')))
+        .copied()
 }
 
 /// Closest finding code to a misspelling, for the `--allow` error. Reuses the
@@ -169,6 +249,17 @@ fn nearest_code(given: &str) -> Option<&'static str> {
 
 fn main() {
     let args = parse_args();
+    diagnostic::init_color(args.color);
+
+    // --decode and --check take a .json or .zip and probe it by extension and by seeking
+    // inside the archive, neither of which a pipe supports.
+    if args.path == "-" && (args.decode || args.check) {
+        let mode = if args.decode { "--decode" } else { "--check" };
+        eprintln!(
+            "paxc: {mode} reads an exported flow from a file, not stdin — give the .json or .zip path"
+        );
+        process::exit(2);
+    }
 
     if args.check {
         run_check(&args);
@@ -180,10 +271,10 @@ fn main() {
         return;
     }
 
-    let src = match fs::read_to_string(&args.path) {
+    let src = match read_source(&args.path) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("paxc: cannot read {}: {}", args.path, e);
+            eprintln!("paxc: cannot read {}: {}", display_path(&args.path), e);
             process::exit(1);
         }
     };
@@ -192,7 +283,7 @@ fn main() {
         Ok(toks) => toks,
         Err(errs) => {
             for e in &errs {
-                diagnostic::from_lex_error(e).report(&args.path, &src);
+                diagnostic::from_lex_error(e).report(display_path(&args.path), &src);
             }
             process::exit(1);
         }
@@ -209,17 +300,23 @@ fn main() {
         Ok(p) => p,
         Err(errs) => {
             for e in &errs {
-                diagnostic::from_parse_error(e).report(&args.path, &src);
+                diagnostic::from_parse_error(e).report(display_path(&args.path), &src);
             }
             process::exit(1);
         }
     };
 
-    let source_dir = Path::new(&args.path).parent();
+    // `pa/` sits beside the source file. Read from stdin there is no such file, so the
+    // caller's own directory is the only sensible place to look.
+    let source_dir = if args.path == "-" {
+        Some(Path::new("."))
+    } else {
+        Path::new(&args.path).parent()
+    };
     let resolved = match resolver::resolve(&program, source_dir) {
         Ok(r) => r,
         Err(e) => {
-            diagnostic::from_resolve_error(&e).report(&args.path, &src);
+            diagnostic::from_resolve_error(&e).report(display_path(&args.path), &src);
             process::exit(1);
         }
     };
@@ -446,6 +543,9 @@ fn read_display_name(source_dir: Option<&Path>) -> Option<String> {
 }
 
 fn derive_name_from_path(path: &str) -> String {
+    if path == "-" {
+        return "flow".to_string();
+    }
     Path::new(path)
         .file_stem()
         .and_then(|s| s.to_str())

@@ -11,12 +11,19 @@ use std::process;
 /// The trailing section every pax binary's usage block carries verbatim.
 pub const COMMON_FLAGS: &str = "\
 Other flags:
-  --help, -h     print this help and exit
-  --version, -V  print the version and exit
+  --color <WHEN>  auto (default), always, or never. auto colours a terminal and
+                  goes plain when piped, honouring NO_COLOR
+  --help, -h      print this help and exit
+  --version, -V   print the version and exit
 
 Claude Code:
   --install-skill    install the pax skill into ~/.claude/skills/paxc
-  --uninstall-skill  remove it again";
+  --uninstall-skill  remove it again
+
+Exit codes:
+  0  success
+  1  bad input — unreadable file, a compile error, a reported finding
+  2  bad invocation — unknown flag, missing argument, contradictory options";
 
 /// Print usage to stderr and exit 2 — the error path for a malformed invocation.
 pub fn usage(text: &str) -> ! {

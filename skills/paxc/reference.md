@@ -8,11 +8,12 @@ semantics, expression operators and precedence, PA accessor catalog, the
 ## Invocation
 
 ```
-paxc [--target pa-legacy] [--name NAME] [--out PATH] <file.pax>
+paxc [--target pa-legacy] [--name NAME] [--out PATH] <file.pax | ->
 paxc --decode <flow.json | flow.zip> [--out-dir DIR]
 paxc --check <flow.json | flow.zip>
+paxc --list-codes
 paxc --help | --version
-paxr [--verbose | --quiet | --debug] <file.pax>
+paxr [--verbose | --quiet | --debug] <file.pax | ->
 paxr --version
 ```
 
@@ -28,7 +29,20 @@ paxr --version
 | `--verbose` / `-v` (paxr) | trace every action the interpreter touches (`init`, `set`, `increment`, `compose`, `condition?`, `iter[N]`, …) |
 | `--quiet` / `-q` (paxr) | suppress all output; exit code only |
 | `--debug` / `-d` (paxr) | print only `debug()` output, no state dump |
+| `--list-codes` (paxc) | print every finding code, one per line, and exit 0. The vocabulary `--allow` accepts, readable without provoking an error to see it |
+| `--color WHEN` (both) | `auto` (default), `always`, or `never`. `auto` colours a terminal and goes plain when piped, honouring `NO_COLOR`; `always` wins over `NO_COLOR`, since naming the flag is a decision. Box-drawing follows the terminal independently, dropping to ASCII when piped |
 | `--version` / `-V` (both) | print version and exit |
+
+`<file.pax>` may be `-`, which reads the source from stdin; diagnostics then name
+it `stdin`. The `pa/` folder is looked for in the current directory, since there
+is no source file for it to sit beside. `--decode` and `--check` refuse `-`: they
+probe an archive by extension and by seeking inside it, and a pipe supports
+neither.
+
+**Exit codes.** `0` success. `1` bad input: an unreadable file, a compile error,
+or a finding reported as an error. `2` bad invocation: an unknown flag (rejected
+with a nearest-match hint rather than taken for a filename), a missing argument,
+or contradictory options.
 
 Default paxr output is the debug lines plus an end-of-run **state dump** listing
 every binding and its final value, tagged `(var <type>)` or `(let)`.
