@@ -13,6 +13,7 @@
 //! export from a tenant, not guessed -- see `examples/tour.pax` and the
 //! packager tests for the artifact-matching invariants.
 
+use crate::pa::ZipError;
 use crate::pa::emitter;
 use crate::resolver::ResolvedProgram;
 use serde_json::{Map, Value, json};
@@ -32,7 +33,7 @@ pub enum Target {
 #[derive(Debug)]
 pub enum PackageError {
     Io(io::Error),
-    Zip(zip::result::ZipError),
+    Zip(ZipError),
     Json(serde_json::Error),
 }
 
@@ -51,11 +52,6 @@ impl std::error::Error for PackageError {}
 impl From<io::Error> for PackageError {
     fn from(e: io::Error) -> Self {
         PackageError::Io(e)
-    }
-}
-impl From<zip::result::ZipError> for PackageError {
-    fn from(e: zip::result::ZipError) -> Self {
-        PackageError::Zip(e)
     }
 }
 impl From<serde_json::Error> for PackageError {
@@ -553,6 +549,10 @@ fn build_flow_envelope(
     })
 }
 
+fn zip_err(e: zip::result::ZipError) -> PackageError {
+    PackageError::Zip(ZipError::new(e))
+}
+
 fn write_zip(out_path: &Path, files: &[(String, Vec<u8>)]) -> Result<(), PackageError> {
     let file = File::create(out_path)?;
     let mut zip = ZipWriter::new(file);
@@ -561,10 +561,10 @@ fn write_zip(out_path: &Path, files: &[(String, Vec<u8>)]) -> Result<(), Package
         .unix_permissions(0o644);
 
     for (path, data) in files {
-        zip.start_file(path, options)?;
+        zip.start_file(path, options).map_err(zip_err)?;
         zip.write_all(data)?;
     }
-    zip.finish()?;
+    zip.finish().map_err(zip_err)?;
     Ok(())
 }
 

@@ -19,6 +19,7 @@
 //! action JSON byte-for-byte. Re-encoding through `paxc --target pa-legacy`
 //! reproduces the action verbatim.
 
+use crate::pa::ZipError;
 use crate::pa::paexpr;
 use serde_json::{Map, Value};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -65,10 +66,7 @@ pub enum DecodeError {
     /// `--decode` at that file directly.
     MultipleFlowsInPackage { path: PathBuf, flows: Vec<String> },
     /// Underlying zip read error (corrupt archive, etc.).
-    Zip {
-        path: PathBuf,
-        source: zip::result::ZipError,
-    },
+    Zip { path: PathBuf, source: ZipError },
 }
 
 impl std::fmt::Display for DecodeError {
@@ -168,7 +166,7 @@ fn read_definition_from_zip(input_path: &Path) -> Result<Vec<u8>, DecodeError> {
     })?;
     let mut archive = zip::ZipArchive::new(file).map_err(|e| DecodeError::Zip {
         path: input_path.to_path_buf(),
-        source: e,
+        source: ZipError::new(e),
     })?;
     // Collect inner definition.json paths grouped by their parent flow folder.
     // Legacy package shape: `Microsoft.Flow/flows/<GUID>/definition.json`. We
@@ -177,7 +175,7 @@ fn read_definition_from_zip(input_path: &Path) -> Result<Vec<u8>, DecodeError> {
     for i in 0..archive.len() {
         let entry = archive.by_index(i).map_err(|e| DecodeError::Zip {
             path: input_path.to_path_buf(),
-            source: e,
+            source: ZipError::new(e),
         })?;
         let name = entry.name().replace('\\', "/");
         if let Some(flow_id) = match_flow_definition_path(&name) {
@@ -192,7 +190,7 @@ fn read_definition_from_zip(input_path: &Path) -> Result<Vec<u8>, DecodeError> {
             let (_, name) = definitions.into_iter().next().unwrap();
             let mut entry = archive.by_name(&name).map_err(|e| DecodeError::Zip {
                 path: input_path.to_path_buf(),
-                source: e,
+                source: ZipError::new(e),
             })?;
             let mut bytes = Vec::with_capacity(entry.size() as usize);
             entry.read_to_end(&mut bytes).map_err(|e| DecodeError::Io {

@@ -12,3 +12,31 @@ pub mod functions;
 pub mod names;
 pub mod packager;
 pub(crate) mod paexpr;
+
+/// An error from the zip backend, with the backend's own type kept out of
+/// the way.
+///
+/// Both `packager::PackageError` and `decoder::DecodeError` are public and
+/// carry archive failures. Naming the zip crate's error type in those
+/// variants would put it in paxc's public API, which makes every major
+/// version of that crate a breaking change here. This carries the rendered
+/// message instead, which is all either caller ever did with it.
+#[derive(Debug)]
+pub struct ZipError(String);
+
+impl std::fmt::Display for ZipError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for ZipError {}
+
+impl ZipError {
+    /// Deliberately a crate-internal constructor rather than a `From` impl:
+    /// a public `From<zip::result::ZipError>` would name the backend's type
+    /// in paxc's API again, which is what this type exists to prevent.
+    pub(crate) fn new(source: zip::result::ZipError) -> Self {
+        ZipError(source.to_string())
+    }
+}
