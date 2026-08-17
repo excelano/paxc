@@ -3,6 +3,7 @@ name = "paxc"
 homepage = "https://excelano.com/paxc/"
 version = "3.9.0"
 edition = "2024"
+rust-version = "1.88"
 description = "A compiler for the pax DSL, producing Power Automate cloud flow definitions"
 license = "MIT"
 authors = ["David M. Anderson"]
@@ -11,13 +12,13 @@ keywords = ["power-automate", "dsl", "compiler", "logic-apps", "workflow"]
 categories = ["command-line-utilities", "compilers"]
 
 [dependencies]
-ariadne = "0.6"
-chumsky = "0.13"
-serde = { version = "1", features = ["derive"] }
-serde_json = { version = "1", features = ["preserve_order"] }
-zip = { version = "2", default-features = false, features = ["deflate-flate2", "flate2"] }
-flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
-uuid = { version = "1", features = ["v4"] }
+ariadne = "0.6.0"
+chumsky = "0.13.0"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = { version = "1.0.151", features = ["preserve_order"] }
+zip = { version = "8.6.0", default-features = false, features = ["deflate-flate2"] }
+flate2 = { version = "1.1.9", default-features = false, features = ["rust_backend"] }
+uuid = { version = "1.24.1", features = ["v4"] }
 
 [lib]
 name = "paxc"
