@@ -13,7 +13,7 @@
 //! export from a tenant, not guessed -- see `examples/tour.pax` and the
 //! packager tests for the artifact-matching invariants.
 
-use crate::pa::ZipError;
+use crate::pa::{JsonError, ZipError};
 use crate::pa::emitter;
 use crate::resolver::ResolvedProgram;
 use serde_json::{Map, Value, json};
@@ -34,7 +34,7 @@ pub enum Target {
 pub enum PackageError {
     Io(io::Error),
     Zip(ZipError),
-    Json(serde_json::Error),
+    Json(JsonError),
 }
 
 impl std::fmt::Display for PackageError {
@@ -52,11 +52,6 @@ impl std::error::Error for PackageError {}
 impl From<io::Error> for PackageError {
     fn from(e: io::Error) -> Self {
         PackageError::Io(e)
-    }
-}
-impl From<serde_json::Error> for PackageError {
-    fn from(e: serde_json::Error) -> Self {
-        PackageError::Json(e)
     }
 }
 
@@ -117,23 +112,23 @@ fn package_pa_legacy(
     let files: Vec<(String, Vec<u8>)> = vec![
         (
             "manifest.json".to_string(),
-            serde_json::to_vec(&root_manifest)?,
+            serde_json::to_vec(&root_manifest).map_err(json_err)?,
         ),
         (
             "Microsoft.Flow/flows/manifest.json".to_string(),
-            serde_json::to_vec(&inner_manifest)?,
+            serde_json::to_vec(&inner_manifest).map_err(json_err)?,
         ),
         (
             format!("Microsoft.Flow/flows/{package_guid}/apisMap.json"),
-            serde_json::to_vec(&apis_map)?,
+            serde_json::to_vec(&apis_map).map_err(json_err)?,
         ),
         (
             format!("Microsoft.Flow/flows/{package_guid}/connectionsMap.json"),
-            serde_json::to_vec(&connections_map)?,
+            serde_json::to_vec(&connections_map).map_err(json_err)?,
         ),
         (
             format!("Microsoft.Flow/flows/{package_guid}/definition.json"),
-            serde_json::to_vec(&flow_def)?,
+            serde_json::to_vec(&flow_def).map_err(json_err)?,
         ),
     ];
 
@@ -547,6 +542,10 @@ fn build_flow_envelope(
             "isManaged": false
         }
     })
+}
+
+fn json_err(e: serde_json::Error) -> PackageError {
+    PackageError::Json(JsonError::new(e))
 }
 
 fn zip_err(e: zip::result::ZipError) -> PackageError {

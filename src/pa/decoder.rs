@@ -19,7 +19,7 @@
 //! action JSON byte-for-byte. Re-encoding through `paxc --target pa-legacy`
 //! reproduces the action verbatim.
 
-use crate::pa::ZipError;
+use crate::pa::{JsonError, ZipError};
 use crate::pa::paexpr;
 use serde_json::{Map, Value};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -46,10 +46,7 @@ pub enum DecodeError {
     /// IO error reading or writing a specific path.
     Io { path: PathBuf, source: io::Error },
     /// Input file is not valid JSON.
-    JsonParse {
-        path: PathBuf,
-        source: serde_json::Error,
-    },
+    JsonParse { path: PathBuf, source: JsonError },
     /// Input JSON is well-formed but lacks the structure paxc expects
     /// (no `properties.definition`, no triggers, etc.).
     BadShape(String),
@@ -150,7 +147,7 @@ pub fn load_flow_json(input_path: &Path) -> Result<Value, DecodeError> {
     };
     serde_json::from_slice(&bytes).map_err(|e| DecodeError::JsonParse {
         path: input_path.to_path_buf(),
-        source: e,
+        source: JsonError::new(e),
     })
 }
 

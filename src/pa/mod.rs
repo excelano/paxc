@@ -21,6 +21,8 @@ pub(crate) mod paexpr;
 /// variants would put it in paxc's public API, which makes every major
 /// version of that crate a breaking change here. This carries the rendered
 /// message instead, which is all either caller ever did with it.
+///
+/// See `JsonError` for the same treatment of the JSON backend.
 #[derive(Debug)]
 pub struct ZipError(String);
 
@@ -38,5 +40,30 @@ impl ZipError {
     /// in paxc's API again, which is what this type exists to prevent.
     pub(crate) fn new(source: zip::result::ZipError) -> Self {
         ZipError(source.to_string())
+    }
+}
+
+/// An error from the JSON backend, kept out of paxc's public API for the
+/// same reason as `ZipError`.
+///
+/// `resolver::ResolveError::PaFileInvalidJson` already rendered its parse
+/// failure to a `String` rather than carrying serde_json's type; this brings
+/// `packager::PackageError::Json` and `decoder::DecodeError::JsonParse` into
+/// line with it.
+#[derive(Debug)]
+pub struct JsonError(String);
+
+impl std::fmt::Display for JsonError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for JsonError {}
+
+impl JsonError {
+    /// Crate-internal for the reason spelled out on `ZipError::new`.
+    pub(crate) fn new(source: serde_json::Error) -> Self {
+        JsonError(source.to_string())
     }
 }
