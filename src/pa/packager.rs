@@ -13,15 +13,15 @@
 //! export from a tenant, not guessed -- see `examples/tour.pax` and the
 //! packager tests for the artifact-matching invariants.
 
-use crate::pa::{JsonError, ZipError};
 use crate::pa::emitter;
+use crate::pa::{JsonError, ZipError};
 use crate::resolver::ResolvedProgram;
 use serde_json::{Map, Value, json};
 use std::fs::File;
 use std::io::{self, Write};
 use std::path::Path;
 use uuid::Uuid;
-use zip::{CompressionMethod, ZipWriter, write::SimpleFileOptions};
+use zip::{CompressionMethod, System, ZipWriter, write::SimpleFileOptions};
 
 /// Output targets paxc can produce beyond the raw JSON.
 #[derive(Debug, Clone, Copy)]
@@ -555,8 +555,15 @@ fn zip_err(e: zip::result::ZipError) -> PackageError {
 fn write_zip(out_path: &Path, files: &[(String, Vec<u8>)]) -> Result<(), PackageError> {
     let file = File::create(out_path)?;
     let mut zip = ZipWriter::new(file);
+    // `.system(Unix)` is set explicitly rather than left to default. zip 2
+    // hardcoded Unix for every entry it wrote; zip 8 derives it from the build
+    // host, so a Windows-hosted paxc would stamp `System::Dos` and pick up the
+    // DOS attribute bits. The package is a build artifact whose bytes are
+    // matched against real tenant exports, so it has to come out the same
+    // wherever paxc was compiled. CI runs on Linux only and cannot see this.
     let options: SimpleFileOptions = SimpleFileOptions::default()
         .compression_method(CompressionMethod::Deflated)
+        .system(System::Unix)
         .unix_permissions(0o644);
 
     for (path, data) in files {
@@ -950,5 +957,74 @@ mod tests {
         let snapshot = actions.clone();
         fix_connector_inputs(&mut actions);
         assert_eq!(actions, snapshot);
+    }
+
+    /// Read the `system` byte out of every central directory header.
+    ///
+    /// Walks the central directory properly rather than scanning for the
+    /// signature, since compressed payloads can contain those four bytes.
+    fn central_directory_host_bytes(zip_bytes: &[u8]) -> Vec<u8> {
+        let u16_at = |i: usize| u16::from_le_bytes([zip_bytes[i], zip_bytes[i + 1]]) as usize;
+        let u32_at = |i: usize| {
+            u32::from_le_bytes([
+                zip_bytes[i],
+                zip_bytes[i + 1],
+                zip_bytes[i + 2],
+                zip_bytes[i + 3],
+            ]) as usize
+        };
+        let eocd = (0..zip_bytes.len().saturating_sub(21))
+            .rev()
+            .find(|&i| zip_bytes[i..i + 4] == *b"PK\x05\x06")
+            .expect("no end-of-central-directory record");
+        let count = u16_at(eocd + 10);
+        let mut at = u32_at(eocd + 16);
+        let mut hosts = Vec::with_capacity(count);
+        for _ in 0..count {
+            assert_eq!(
+                zip_bytes[at..at + 4],
+                *b"PK\x01\x02",
+                "central directory entry not where the record said"
+            );
+            // Offset 4 is `version made by`: low byte the spec version, high
+            // byte the host system.
+            hosts.push(zip_bytes[at + 5]);
+            at += 46 + u16_at(at + 28) + u16_at(at + 30) + u16_at(at + 32);
+        }
+        hosts
+    }
+
+    #[test]
+    fn every_entry_is_written_with_the_unix_host_byte() {
+        // zip 2 hardcoded Unix for every entry it wrote. zip 8 takes it from
+        // the build host unless told otherwise, so without an explicit
+        // `.system(Unix)` a Windows-built paxc stamps `System::Dos` here and
+        // the package stops being identical across build hosts.
+        //
+        // Note what this test can and cannot do. Run on Linux it cannot tell
+        // an explicit `.system(Unix)` from the host default, which agrees --
+        // so it would not have caught the regression it exists to prevent.
+        // What it does is pin the invariant on whatever host runs it, which
+        // makes it a real check on a Windows or macOS developer machine and
+        // on any future runner, and it fails everywhere if the call is
+        // changed rather than dropped.
+        let dir = std::env::temp_dir().join(format!("paxc-hostbyte-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let out = dir.join("hostbyte.zip");
+        let files = vec![
+            ("manifest.json".to_string(), b"{}".to_vec()),
+            (
+                "Microsoft.Flow/flows/manifest.json".to_string(),
+                b"[]".to_vec(),
+            ),
+        ];
+        write_zip(&out, &files).expect("write_zip failed");
+
+        let hosts = central_directory_host_bytes(&std::fs::read(&out).unwrap());
+        assert_eq!(hosts.len(), files.len(), "one entry per file");
+        for host in hosts {
+            assert_eq!(host, System::Unix as u8, "entry not written as Unix-hosted");
+        }
+        std::fs::remove_dir_all(&dir).ok();
     }
 }
