@@ -19,8 +19,8 @@
 //! action JSON byte-for-byte. Re-encoding through `paxc --target pa-legacy`
 //! reproduces the action verbatim.
 
-use crate::pa::{JsonError, ZipError};
 use crate::pa::paexpr;
+use crate::pa::{JsonError, ZipError};
 use serde_json::{Map, Value};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
@@ -168,7 +168,13 @@ fn read_definition_from_zip(input_path: &Path) -> Result<Vec<u8>, DecodeError> {
     // Collect inner definition.json paths grouped by their parent flow folder.
     // Legacy package shape: `Microsoft.Flow/flows/<GUID>/definition.json`. We
     // accept either forward or back slashes (some zip producers vary).
-    let mut definitions: Vec<(String, String)> = Vec::new();
+    //
+    // The index is what gets carried, not the name. The name is normalized to
+    // forward slashes so the matcher only has one shape to recognize, which
+    // makes it the wrong key to fetch by: `by_name` is an exact byte lookup
+    // against the raw stored name, so a backslash-separated package matched
+    // here and then failed to load with "specified file not found in archive".
+    let mut definitions: Vec<(String, usize)> = Vec::new();
     for i in 0..archive.len() {
         let entry = archive.by_index(i).map_err(|e| DecodeError::Zip {
             path: input_path.to_path_buf(),
@@ -176,7 +182,7 @@ fn read_definition_from_zip(input_path: &Path) -> Result<Vec<u8>, DecodeError> {
         })?;
         let name = entry.name().replace('\\', "/");
         if let Some(flow_id) = match_flow_definition_path(&name) {
-            definitions.push((flow_id, name));
+            definitions.push((flow_id, i));
         }
     }
     match definitions.len() {
@@ -184,8 +190,8 @@ fn read_definition_from_zip(input_path: &Path) -> Result<Vec<u8>, DecodeError> {
             path: input_path.to_path_buf(),
         }),
         1 => {
-            let (_, name) = definitions.into_iter().next().unwrap();
-            let mut entry = archive.by_name(&name).map_err(|e| DecodeError::Zip {
+            let (_, index) = definitions.into_iter().next().unwrap();
+            let mut entry = archive.by_index(index).map_err(|e| DecodeError::Zip {
                 path: input_path.to_path_buf(),
                 source: ZipError::new(e),
             })?;
@@ -3140,6 +3146,134 @@ mod tests {
             matches!(err, DecodeError::NoFlowInPackage { .. }),
             "got: {err}"
         );
+    }
+
+    /// CRC-32 (IEEE, reflected), written out rather than pulled from a crate.
+    ///
+    /// The point of the fixture below is to be an independent producer, so it
+    /// shares no machinery with the code it is used to test.
+    fn crc32(data: &[u8]) -> u32 {
+        let mut crc = 0xFFFF_FFFFu32;
+        for &byte in data {
+            crc ^= byte as u32;
+            for _ in 0..8 {
+                let mask = (crc & 1).wrapping_neg();
+                crc = (crc >> 1) ^ (0xEDB8_8320 & mask);
+            }
+        }
+        !crc
+    }
+
+    /// Assemble a zip byte by byte, with stored (uncompressed) entries.
+    ///
+    /// Every other zip test here builds its fixture with the same crate that
+    /// reads it back, which makes the writer and the reader agree by
+    /// construction and hides anything that depends on how a *foreign*
+    /// producer lays a package out. A real PA export is a foreign producer.
+    /// `names` is taken verbatim, so a caller can hand it separators the zip
+    /// crate would not itself emit.
+    fn write_raw_stored_zip(label: &str, entries: &[(&str, &[u8])]) -> PathBuf {
+        let dir = tmp_dir(label);
+        let zip_path = dir.join(format!("{label}.zip"));
+
+        let mut body: Vec<u8> = Vec::new();
+        let mut central: Vec<u8> = Vec::new();
+        for (name, data) in entries {
+            let offset = body.len() as u32;
+            let crc = crc32(data);
+            let size = data.len() as u32;
+            let name_bytes = name.as_bytes();
+            let name_len = name_bytes.len() as u16;
+
+            body.extend_from_slice(b"PK\x03\x04");
+            body.extend_from_slice(&20u16.to_le_bytes()); // version needed
+            body.extend_from_slice(&0u16.to_le_bytes()); // flags
+            body.extend_from_slice(&0u16.to_le_bytes()); // method: stored
+            body.extend_from_slice(&0u16.to_le_bytes()); // mod time
+            body.extend_from_slice(&0u16.to_le_bytes()); // mod date
+            body.extend_from_slice(&crc.to_le_bytes());
+            body.extend_from_slice(&size.to_le_bytes()); // compressed
+            body.extend_from_slice(&size.to_le_bytes()); // uncompressed
+            body.extend_from_slice(&name_len.to_le_bytes());
+            body.extend_from_slice(&0u16.to_le_bytes()); // extra len
+            body.extend_from_slice(name_bytes);
+            body.extend_from_slice(data);
+
+            central.extend_from_slice(b"PK\x01\x02");
+            central.extend_from_slice(&[20, 3]); // version made by: 2.0, Unix
+            central.extend_from_slice(&20u16.to_le_bytes()); // version needed
+            central.extend_from_slice(&0u16.to_le_bytes()); // flags
+            central.extend_from_slice(&0u16.to_le_bytes()); // method: stored
+            central.extend_from_slice(&0u16.to_le_bytes()); // mod time
+            central.extend_from_slice(&0u16.to_le_bytes()); // mod date
+            central.extend_from_slice(&crc.to_le_bytes());
+            central.extend_from_slice(&size.to_le_bytes()); // compressed
+            central.extend_from_slice(&size.to_le_bytes()); // uncompressed
+            central.extend_from_slice(&name_len.to_le_bytes());
+            central.extend_from_slice(&0u16.to_le_bytes()); // extra len
+            central.extend_from_slice(&0u16.to_le_bytes()); // comment len
+            central.extend_from_slice(&0u16.to_le_bytes()); // disk start
+            central.extend_from_slice(&0u16.to_le_bytes()); // internal attrs
+            central.extend_from_slice(&(0o644u32 << 16).to_le_bytes()); // external
+            central.extend_from_slice(&offset.to_le_bytes());
+            central.extend_from_slice(name_bytes);
+        }
+
+        let central_offset = body.len() as u32;
+        let central_size = central.len() as u32;
+        let count = entries.len() as u16;
+        body.extend_from_slice(&central);
+        body.extend_from_slice(b"PK\x05\x06");
+        body.extend_from_slice(&0u16.to_le_bytes()); // disk number
+        body.extend_from_slice(&0u16.to_le_bytes()); // disk with central dir
+        body.extend_from_slice(&count.to_le_bytes());
+        body.extend_from_slice(&count.to_le_bytes());
+        body.extend_from_slice(&central_size.to_le_bytes());
+        body.extend_from_slice(&central_offset.to_le_bytes());
+        body.extend_from_slice(&0u16.to_le_bytes()); // comment len
+
+        fs::write(&zip_path, &body).unwrap();
+        zip_path
+    }
+
+    #[test]
+    fn decode_file_reads_a_zip_this_crate_did_not_write() {
+        let zip_path = write_raw_stored_zip(
+            "zip_foreign",
+            &[
+                ("manifest.json", b"{}"),
+                (
+                    "Microsoft.Flow/flows/guid-1/definition.json",
+                    &minimal_definition_json(),
+                ),
+            ],
+        );
+        let out = tmp_dir("zip_foreign_out");
+        let report = decode_file(&zip_path, &out).expect("decode failed");
+        assert!(read(&report.pax_path).contains("var x: int = 1"));
+    }
+
+    #[test]
+    fn decode_file_reads_backslash_separated_entries() {
+        // Regression: the scan normalizes `\` to `/` so the matcher has one
+        // shape to recognize, and the normalized string used to be what got
+        // fetched. `by_name` is an exact byte lookup, so this package was
+        // recognized and then died with "specified file not found in
+        // archive". Some Windows producers write separators this way, which
+        // is why the normalization is there at all.
+        let zip_path = write_raw_stored_zip(
+            "zip_backslash",
+            &[
+                ("manifest.json", b"{}"),
+                (
+                    r"Microsoft.Flow\flows\guid-1\definition.json",
+                    &minimal_definition_json(),
+                ),
+            ],
+        );
+        let out = tmp_dir("zip_backslash_out");
+        let report = decode_file(&zip_path, &out).expect("backslash package should decode");
+        assert!(read(&report.pax_path).contains("var x: int = 1"));
     }
 
     #[test]
