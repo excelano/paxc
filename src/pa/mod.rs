@@ -22,7 +22,8 @@ pub(crate) mod paexpr;
 /// version of that crate a breaking change here. This carries the rendered
 /// message instead, which is all either caller ever did with it.
 ///
-/// See `JsonError` for the same treatment of the JSON backend.
+/// See `JsonError`, which wraps the JSON backend the same way for a
+/// weaker reason.
 #[derive(Debug)]
 pub struct ZipError(String);
 
@@ -43,13 +44,20 @@ impl ZipError {
     }
 }
 
-/// An error from the JSON backend, kept out of paxc's public API for the
-/// same reason as `ZipError`.
+/// An error from the JSON backend, carrying its rendered message rather
+/// than serde_json's own error type.
 ///
 /// `resolver::ResolveError::PaFileInvalidJson` already rendered its parse
 /// failure to a `String` rather than carrying serde_json's type; this brings
 /// `packager::PackageError::Json` and `decoder::DecodeError::JsonParse` into
-/// line with it.
+/// line with it. Consistency is the argument, not insulation.
+///
+/// Note that this does *not* buy what `ZipError` buys. zip is now genuinely
+/// absent from paxc's public API, so a major bump of that crate is not a
+/// breaking change here. serde_json is not: `Value` and `Map` appear in the
+/// signatures of `emitter::emit`, `check::check_flow`, `decoder::decode`,
+/// `decoder::load_flow_json` and both `check` entry points, so a serde_json
+/// 2.0 would break paxc's API whatever this type does.
 #[derive(Debug)]
 pub struct JsonError(String);
 
