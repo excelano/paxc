@@ -104,7 +104,7 @@ powershell -ExecutionPolicy ByPass -c "irm https://github.com/excelano/paxc/rele
 
 ### Cargo
 
-If you have a Rust toolchain, install the latest release from [crates.io](https://crates.io/crates/paxc). This builds and installs both `paxc` and `paxr` into `~/.cargo/bin`:
+If you have a Rust toolchain (1.88 or newer), install the latest release from [crates.io](https://crates.io/crates/paxc). This builds and installs both `paxc` and `paxr` into `~/.cargo/bin`:
 
 ```sh
 cargo install paxc && paxc --install-skill
@@ -112,7 +112,7 @@ cargo install paxc && paxc --install-skill
 
 ### Build from source
 
-Requires Rust (edition 2024, toolchain 1.85+). If you don't have Rust, install it first via [rustup](https://rustup.rs).
+Requires Rust (edition 2024, toolchain 1.88+). If you don't have Rust, install it first via [rustup](https://rustup.rs).
 
 ```sh
 git clone https://github.com/excelano/paxc
