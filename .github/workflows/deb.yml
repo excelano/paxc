@@ -29,4 +29,3 @@ jobs:
     uses: excelano/.github/.github/workflows/deb.yml@main
     with:
       tag: ${{ github.event.release.tag_name || inputs.tag }}
-      commands: 'paxc paxr'
