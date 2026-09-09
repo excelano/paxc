@@ -1,58 +1,43 @@
 # Releasing paxc
 
-The release loop for a new version. Run it from a clean `main` with the working tree committed. Examples below cut `v1.2.3`; substitute the version you are actually releasing.
+The release loop lives in `~/notes/releasing.md` — the ordered steps, the apt
+step, crates.io, the winget submission and its rate rule, the spent-tag rule,
+and the standing facts about tokens and secrets. Failure recipes are in
+`~/notes/build_release_gotchas.md`. This file carries what is true of paxc and
+not of its siblings.
 
-The crate ships **two binaries**: `paxc`, the compiler, and `paxr`, the interpreter. They version together and travel together — one tarball, one Debian package, one Homebrew formula, one winget package with an alias for each command. There is no way to release one without the other, and no reason to want to, since the interpreter exists to run the same source the compiler consumes.
+| | |
+|---|---|
+| Loop | cargo-dist |
+| Version lives in | `version` in `Cargo.toml` |
+| `apt-ship` argument | `paxc` |
+| crate | `paxc` |
+| winget package | `Excelano.paxc` |
+| Windows asset | `paxc-x86_64-pc-windows-msvc.zip` |
+| Commands | `paxc`, `paxr` |
 
-1. **Bump the version.** Edit `version` in `Cargo.toml`. Update `Cargo.lock` with a build (`cargo build`), run `cargo test`, commit.
+**The crate ships two binaries and they travel together.** `paxc` is the
+compiler and `paxr` the interpreter; they version together, in one tarball, one
+Debian package, one Homebrew formula, and one winget package with an alias for
+each command. There is no way to release one without the other and no reason to
+want to, since the interpreter exists to run the same source the compiler
+consumes. This is why paxc is one winget PR and not two, unlike xfiles.
 
-2. **Tag and push.** `git tag v1.2.3 && git push origin main --tags`. The `v*` tag triggers cargo-dist (`.github/workflows/release.yml`), which builds the five platform tarballs, the shell and PowerShell installers, the Homebrew formula, and the checksums, then creates the GitHub Release.
+**The `NestedInstallerFiles` block carries both executables.** komac generates
+from the previous version's manifest, so it comes along on its own. If a
+manifest is ever written by hand, that block is the thing to get right: dropping
+an entry ships a package that installs one command and looks fine doing it.
 
-3. **Build the .debs.** cargo-dist creates the release with the default `GITHUB_TOKEN`, and GitHub does **not** fire `release: published` for token-created releases (a documented anti-recursion safeguard). So `deb.yml` won't auto-run — dispatch it by hand:
-   ```sh
-   gh workflow run deb.yml -f tag=v1.2.3
-   ```
-   It builds amd64 + arm64 packages and uploads them to the release. Both binaries and `REFERENCE.md` are inside each package, so the language reference a user reads at `/usr/share/doc/paxc/` is whatever was committed at the tag.
+**Import a compiled flow before tagging, when a release touches action
+emission.** The compiler's output is the contract — paxc emits flow definitions
+Power Automate has to accept, and the test suite checks the shapes paxc believes
+in rather than what the service currently tolerates. A green suite is not the
+same claim. Test corpora built from real exports stay out of the repo; they
+carry tenant identifiers.
 
-   **This is the step that gets skipped.** Nothing downstream complains: the release page looks finished, the installers work, Homebrew and crates.io are already live, and the only symptom is that apt keeps serving the previous version indefinitely. Before moving on, confirm the two `.deb` files are actually attached to the release.
+**The tutorial is a separate deliverable.** `excelano.com/paxc/tutorial/` lives
+outside this repo and no release rebuilds it, so a language change that
+invalidates a tutorial step needs a deliberate follow-up there.
 
-4. **Ship to apt.** This is the channel you install from, so a release that has not reached it is not shipped, whatever the release page says. It sits before crates.io deliberately: the packages exist as of step 3, and anything inserted between building them and shipping them is another place to stop.
-   ```sh
-   apt-ship paxc v1.2.3
-   ```
-   It downloads every `.deb` on the release — cargo-deb names them with a package revision, `paxc_1.2.3-1_amd64.deb` — adds each to the pool, re-signs the indices, previews the rsync, **refuses to deploy if the preview would delete anything**, pushes, and verifies against the live index on both architectures. The tag is optional; with none it takes the latest release. See `feedback_rsync_parent_wipes_subpath` for why the deletion guard exists.
-
-   **This is the step releases lose.** Nothing downstream depends on apt — winget reads the GitHub release directly and ships fine over a release whose apt step never happened — so the failure is silent and everything else looks finished. `fleet -r` is what catches it: an `APT` column reading `behind`, and the `apt-ship` line to fix it.
-
-   `updatesite` is an rsync and does not touch git, but a routine package add leaves nothing to commit either — `dists/` and `pool/` are gitignored build artifacts, which is also why `git status` in the apt repo cannot tell you the step was skipped. Commit the apt repo only when you changed something tracked: a script, `conf/release.conf`, a metapackage `control` file, or the README's curated install hint.
-
-5. **crates.io publishes itself.** The `v*` tag also triggers `publish-crate.yml`, which runs `cargo publish` with the org-secret token, so crates.io is live within a minute of the push and there is no local step. Confirm it succeeded:
-   ```sh
-   gh run list --workflow=publish-crate.yml --limit 1
-   ```
-   Do **not** run `cargo publish` by hand — the pipeline beats you to it and you'll just get `already exists`. **Versions are immutable**: you can `cargo yank` a bad release to hide it from new dependency resolution, but never re-publish the same number. A fix is always a fresh version bump, never a re-push.
-
-6. **Submit the winget manifest.** winget stores one manifest per version, so every release needs its own PR; there is no update in place. Sync the fork, then run komac:
-   ```sh
-   komac sync
-   komac update Excelano.paxc --version 1.2.3 \
-     --urls https://github.com/excelano/paxc/releases/download/v1.2.3/paxc-x86_64-pc-windows-msvc.zip \
-     --submit
-   ```
-   It downloads the asset, computes the `InstallerSha256`, generates the manifest from the previous version's, and opens the PR against `microsoft/winget-pkgs`. Because it generates from the previous manifest, the `NestedInstallerFiles` block carrying both `paxc.exe` and `paxr.exe` comes along on its own; if you ever hand-write a manifest instead, that block is the thing to get right, since dropping an entry silently ships a package that installs only one command. Drop `--submit` (or add `--dry-run --output ./dir`) to eyeball it first, and check the generated hash against the release's published `.sha256`.
-
-   **Sync the fork before submitting**, every time. A fork that has drifted behind upstream fails in a way that reads like a permissions problem rather than a stale fork; recipe in `~/notes/build_release_gotchas.md`.
-
-   A **version update** to an already-merged package clears automated validation and merges with no human involved, usually inside a day. A **new package** picks up the `New-Package` label and waits on a volunteer moderator, which runs to days or weeks. Two failures recur, both with recipes in `~/notes/build_release_gotchas.md`: `Validation-Defender-Error` (a Defender heuristic flags the unsigned cargo-dist binary — submit the false positive, never rebuild to appease it) and `Validation-Executable-Error` (validation runs the exe with no arguments and reports a non-zero exit, which an intentional usage guard will trip).
-
-   **A pushed `v*` tag is spent.** The merged manifest pins `InstallerSha256`, so deleting and re-cutting a tag swaps the release asset out from under it and breaks every install of that version. That is the same immutability rule step 5 states for crates.io, except nothing here refuses the second attempt — winget, apt, and the Homebrew formula all overwrite silently. If a release goes wrong after the tag is pushed, bump to the next number.
-
-## Notes
-
-- **The compiler's output is the contract.** paxc emits flow definitions that Power Automate has to accept, and the test suite checks the shapes paxc believes in rather than what the service currently tolerates. When a release touches action emission, import one compiled flow into a real tenant before tagging. Test corpora built from real exports stay out of the repo; they carry tenant identifiers.
-- **The tutorial is a separate deliverable.** `excelano.com/paxc/tutorial/` lives outside this repo and is not rebuilt by a release, so a language change that invalidates a tutorial step needs a deliberate follow-up there.
-- **crates.io API needs a User-Agent.** Requests without one return empty (`name: None`). To verify a publish from a script: `curl -s -H "User-Agent: …" https://crates.io/api/v1/crates/paxc`.
-- **First-time crates.io setup:** the `CRATES_IO_TOKEN` org secret must be present for `publish-crate.yml` to fire; a verified crates.io email is required before the first publish; the token needs the `publish-new` + `publish-update` scopes.
-- **Homebrew tap access is an org-secret question.** cargo-dist pushes the formula to `excelano/homebrew-tap` with `HOMEBREW_TAP_TOKEN`. If that secret is scoped to selected repositories, a repo that is not on the list fails the `publish-homebrew-formula` job at checkout with `Input required and not supplied: token` while the rest of the release succeeds. Don't re-run that job against the old tag afterwards; push the formula by hand for that release and let the token fix take effect on the next one.
-- **docs.rs** rebuilds automatically on each publish — no action needed.
-- The README, `REFERENCE.md`, the landing page (`excelano.com/paxc`), and `SECURITY.md` reference the version implicitly via "latest"; none need a per-release edit.
+The README, `REFERENCE.md`, the landing page and `SECURITY.md` all refer to the
+version as "latest" and need no per-release edit.
