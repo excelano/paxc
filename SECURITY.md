@@ -8,7 +8,7 @@ Please do not open public issues for security problems.
 
 ## Supported versions
 
-The latest 3.x release receives security fixes. Earlier major versions are not supported. paxc is distributed as source via `cargo install`; pull and rebuild to apply fixes.
+The latest release receives security fixes. Older versions are not supported. Fixes ship in a new tagged release; update the way you installed.
 
 ## What paxc can access
 
