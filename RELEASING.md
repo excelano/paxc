@@ -9,12 +9,11 @@ not of its siblings.
 | | |
 |---|---|
 | Loop | cargo-dist |
-| Version lives in | `version` in `Cargo.toml` |
+| Version lives in | `Cargo.toml` |
 | `apt-ship` argument | `paxc` |
-| crate | `paxc` |
-| winget package | `Excelano.paxc` |
-| Windows asset | `paxc-x86_64-pc-windows-msvc.zip` |
-| Commands | `paxc`, `paxr` |
+| Packages per release | 2, amd64 arm64 |
+| crates | `paxc` |
+| winget package | `Excelano.paxc` — `paxc-x86_64-pc-windows-msvc.zip` |
 
 **The crate ships two binaries and they travel together.** `paxc` is the
 compiler and `paxr` the interpreter; they version together, in one tarball, one
