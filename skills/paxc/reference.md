@@ -120,14 +120,17 @@ type-mismatched targets yield `null` instead of erroring (matching PA's
 ### PA accessor calls
 
 paxc recognizes these as PA's runtime accessors and emits them unchanged; paxr
-partially simulates them:
+partially simulates them. They are written here as they are written in pax
+source, which means double-quoted — see *Double quotes here* in `SKILL.md` for
+why the single-quoted form you have seen in PA's documentation belongs only
+inside `pa/*.json`:
 
 | Accessor | paxr behavior |
 |---|---|
 | `triggerBody()`, `triggerOutputs()`, `trigger()` | returns `null` with `<skipping unknown "…">` (no runtime data locally) |
-| `parameters('name')` | returns `null` with `<skipping unknown "…">` |
-| `body('actionKey')`, `outputs('actionKey')`, `actions('actionKey')` | returns `null` with `<skipping unknown "…">` |
-| `iterationIndexes('loopKey')` | returns the active `foreach` iteration counter |
+| `parameters("name")` | returns `null` with `<skipping unknown "…">` |
+| `body("actionKey")`, `outputs("actionKey")`, `actions("actionKey")` | returns `null` with `<skipping unknown "…">` |
+| `iterationIndexes("loopKey")` | returns the active `foreach` iteration counter |
 | `item()` | returns the current `foreach` item (via the iterator name) |
 
 ## Control flow
