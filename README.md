@@ -79,14 +79,6 @@ Then install it, so `brew upgrade` keeps it current. Installs both `paxc` and `p
 brew install paxc && paxc --install-skill
 ```
 
-### Prebuilt binary (Linux and macOS)
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/excelano/paxc/main/install.sh | sh
-```
-
-The installer downloads the right tarball for your platform from the GitHub release, verifies its checksum, and drops both `paxc` and `paxr` into `~/.cargo/bin` (or the equivalent on Windows). Releases also ship raw tarballs (`paxc-*.tar.xz` / `.zip`) for manual installation.
-
 ### Windows
 
 With [WinGet](https://learn.microsoft.com/windows/package-manager/), so `winget upgrade` keeps it current (installs both `paxc` and `paxr`):
@@ -94,12 +86,6 @@ With [WinGet](https://learn.microsoft.com/windows/package-manager/), so `winget 
 ```powershell
 winget install Excelano.paxc
 paxc --install-skill
-```
-
-Or run the standalone installer in PowerShell:
-
-```powershell
-powershell -ExecutionPolicy ByPass -c "irm https://github.com/excelano/paxc/releases/latest/download/paxc-installer.ps1 | iex"
 ```
 
 ### Cargo
@@ -132,7 +118,7 @@ paxc --install-skill
 
 That writes `~/.claude/skills/paxc/` and stamps in the version it came from, so a later run reports whether the skill has fallen behind the binary rather than leaving you to notice. It is safe to re-run: an unchanged skill reports `already current` and nothing is written. `paxc --uninstall-skill` removes it. Restart Claude Code afterwards, since skills are discovered at session start.
 
-The skill is compiled into the binary, so this works the same however you installed paxc — apt, Homebrew, cargo, the curl one-liner, or a build from source.
+The skill is compiled into the binary, so this works the same however you installed paxc — apt, Homebrew, cargo, or a build from source.
 
 ## Uninstall
 
@@ -142,12 +128,6 @@ If you installed via apt, `apt remove` also clears the reference docs under `/us
 
 ```bash
 sudo apt remove paxc
-```
-
-If you installed via the shell installer, the uninstaller removes both binaries from `~/.cargo/bin/`:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/excelano/paxc/main/uninstall.sh | sh
 ```
 
 If you used `cargo install` (or prefer to do it by hand), the binaries are in `~/.cargo/bin/`:
