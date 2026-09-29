@@ -10,3 +10,4 @@
 # real directory, and this is a symlink on the machine it is developed on,
 # so the slashed form silently stopped covering it.
 tests/corpus
+ship.toml
