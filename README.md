@@ -90,7 +90,7 @@ paxc --install-skill
 
 ### Cargo
 
-If you have a Rust toolchain (1.88 or newer), install the latest release from [crates.io](https://crates.io/crates/paxc). This builds and installs both `paxc` and `paxr` into `~/.cargo/bin`:
+If you have a Rust toolchain (1.88 or newer), install the latest release from [crates.io](https://crates.io/crates/paxc). This builds and installs both `paxc` and `paxr` into `~/.cargo/bin`. The crate is a command-line tool, and its Rust modules are not a supported API:
 
 ```sh
 cargo install paxc && paxc --install-skill
