@@ -1,3 +1,6 @@
+// Author: David M. Anderson
+// Built with AI assistance (Claude, Anthropic)
+
 use chumsky::prelude::*;
 use paxc::pa::{decoder, emitter, packager};
 use paxc::{check, cli, diagnostic, lexer, parser, resolver, skill};
@@ -87,7 +90,7 @@ fn parse_args() -> Args {
         match argv[i].as_str() {
             "--help" | "-h" => help(),
             "--version" | "-V" => {
-                println!("paxc {}", env!("CARGO_PKG_VERSION"));
+                println!("paxc {}", skill::version());
                 process::exit(0);
             }
             // Terminal actions: they touch the user's skills directory and

@@ -1,3 +1,6 @@
+// Author: David M. Anderson
+// Built with AI assistance (Claude, Anthropic)
+
 //! paxr — the pax runner (interpreter).
 //!
 //! Reads a .pax file, parses and resolves it the same way paxc does, and
@@ -54,7 +57,7 @@ fn main() {
         match arg.as_str() {
             "--help" | "-h" => cli::help(&usage_text()),
             "--version" | "-V" => {
-                println!("paxr {}", env!("CARGO_PKG_VERSION"));
+                println!("paxr {}", skill::version());
                 process::exit(0);
             }
             // The skill covers both binaries, so either can install it; the
