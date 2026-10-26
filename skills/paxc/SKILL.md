@@ -64,8 +64,7 @@ the round-trip decoder (`paxc --decode`), the file-based `pa/` folder convention
 the `on <status>` error-path handlers, and the `switch` / `until` / `scope` /
 `terminate` statements. Check for `--decode` in `paxc --help`, and expect an older
 copy to reject the statement keywords as syntax errors; if any are missing, upgrade with
-`sudo apt install --only-upgrade paxc` (Debian/Ubuntu) or by re-running the
-install one-liner from the README.
+`sudo apt install --only-upgrade paxc` (Debian/Ubuntu) or the way you installed it.
 
 ## The one rule that decides what belongs where
 
@@ -156,7 +155,7 @@ message &= ", world"                       // → AppendToStringVariable
 tags += "urgent"                           // → AppendToArrayVariable
 ```
 
-Six v1 types: `int`, `float`, `string`, `bool`, `array`, `object`. Assignment
+The types are `int`, `float`, `string`, `bool`, `array`, `object`. Assignment
 forms map one-to-one to PA's variable actions: `=` → `SetVariable`, `+=` on
 int/float → `IncrementVariable`, `-=` on int/float → `DecrementVariable`, `&=`
 on string → `AppendToStringVariable`, `+=` on array → `AppendToArrayVariable`.

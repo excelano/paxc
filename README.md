@@ -4,9 +4,9 @@
 
 For the full language reference, see [REFERENCE.md](REFERENCE.md).
 
-Every construct listed in REFERENCE.md is implemented and tested, end-to-end deployment to Power Automate is validated, and a legacy-format package target lets you import compiled flows directly through the Power Automate portal.
+A legacy-format package target lets you import compiled flows directly through the Power Automate portal.
 
-Round-trip ingest from real PA exports is the primary forward direction: `paxc --decode <flow.json>` reads an exported PA flow JSON and writes a `.pax` source file plus a `pa/` folder. Variables, Compose, container actions (`if`/`foreach`/`until`/`switch`/`scope`), `on` error-path handlers, `terminate`, and PA expressions including the standard accessors (`triggerBody()`, `triggerOutputs()`, `parameters("X")`, `body("Foo")`, `iterationIndexes("Loop")`, etc.) and slash- or index-style path expressions (`triggerBody()?["body/email"]`, `arr?[0]`) all round-trip to pax source. PA action keys with characters outside pax's identifier rules (e.g. `Send_an_email_(V2)`) are normalized on decode and restored byte-for-byte on re-encode via `pa/flow.json.actionNameMap`.
+`paxc --decode <flow.json>` reads an exported PA flow JSON and writes a `.pax` source file plus a `pa/` folder. Variables, Compose, container actions (`if`/`foreach`/`until`/`switch`/`scope`), `on` error-path handlers, `terminate`, and PA expressions including the standard accessors (`triggerBody()`, `triggerOutputs()`, `parameters("X")`, `body("Foo")`, `iterationIndexes("Loop")`, etc.) and slash- or index-style path expressions (`triggerBody()?["body/email"]`, `arr?[0]`) all round-trip to pax source. PA action keys with characters outside pax's identifier rules (e.g. `Send_an_email_(V2)`) are normalized on decode and restored byte-for-byte on re-encode via `pa/flow.json.actionNameMap`.
 
 The division of labour is a file convention. Connector bodies, ParseJson, and any non-default trigger live in JSON files next to the source under a `pa/` folder; connectors (`OpenApiConnection`, `OpenApiConnectionWebhook`, `ParseJson`, and the rest) stay opaque as `pa <Name>` blocks pointing at those files. pax owns the programmable parts — variables, control flow, expressions — and the files own the PA-specific parts. Opaque connectors are the design endpoint, not a residual gap.
 
@@ -90,7 +90,7 @@ paxc --install-skill
 
 ### Cargo
 
-If you have a Rust toolchain (1.88 or newer), install the latest release from [crates.io](https://crates.io/crates/paxc). This builds and installs both `paxc` and `paxr` into `~/.cargo/bin`. The crate is a command-line tool, and its Rust modules are not a supported API:
+If you have a Rust toolchain (`Cargo.toml` names the version it needs), install the latest release from [crates.io](https://crates.io/crates/paxc). This builds and installs both `paxc` and `paxr` into `~/.cargo/bin`. The crate is a command-line tool, and its Rust modules are not a supported API:
 
 ```sh
 cargo install paxc && paxc --install-skill
@@ -98,7 +98,7 @@ cargo install paxc && paxc --install-skill
 
 ### Build from source
 
-Requires Rust (edition 2024, toolchain 1.88+). If you don't have Rust, install it first via [rustup](https://rustup.rs).
+Requires the Rust toolchain `Cargo.toml` names. If you don't have Rust, install it first via [rustup](https://rustup.rs).
 
 ```sh
 git clone https://github.com/excelano/paxc

@@ -49,7 +49,7 @@ every binding and its final value, tagged `(var <type>)` or `(let)`.
 
 ## Types
 
-Six v1 types: `int`, `float`, `string`, `bool`, `array`, `object`. No implicit
+The types are `int`, `float`, `string`, `bool`, `array`, `object`. No implicit
 coercion between int and float except at variable initialization (an int literal
 assigned to a float-typed `var` is coerced). Arithmetic promotes to float when
 either operand is float; `int / int` stays int (matching PA's integer division).
@@ -312,7 +312,7 @@ Semantics worth knowing:
 - `guid()` returns a fresh UUID per call; runs that use it aren't
   bit-for-bit reproducible (matches PA).
 
-Date/time (`utcNow`, `formatDateTime`, `addMinutes`, …) are not yet in paxr;
+Date/time (`utcNow`, `formatDateTime`, `addMinutes`, …) are not in paxr;
 they render as `null` locally but work in PA.
 
 ## The `runAfter` rule
@@ -354,8 +354,7 @@ Error: [expr-unknown-function] `noSuchFn(...)` is not a Power Automate expressio
    │                               ╰─── here
 ```
 
-This closes the gap that pax source has always been validated and `pa/` bodies
-never were. An error fails the compile and **nothing is written** — no JSON on
+An error fails the compile and **nothing is written** — no JSON on
 stdout, no `.zip`.
 
 `--allow <CODE>` demotes one code from error to warning; repeat it for more.
