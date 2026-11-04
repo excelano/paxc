@@ -121,7 +121,7 @@ fn package_and_read_definition(dir: &Path, label: &str) -> Value {
 
     let mut archive = zip::ZipArchive::new(fs::File::open(&zip_path).unwrap()).unwrap();
     let name = (0..archive.len())
-        .map(|i| archive.by_index(i).unwrap().name().to_string())
+        .map(|i| archive.by_index(i).unwrap().name().unwrap().into_owned())
         .find(|n| n.ends_with("definition.json"))
         .unwrap_or_else(|| panic!("{label}: no definition.json in the package"));
     let mut text = String::new();

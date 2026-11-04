@@ -180,7 +180,13 @@ fn read_definition_from_zip(input_path: &Path) -> Result<Vec<u8>, DecodeError> {
             path: input_path.to_path_buf(),
             source: ZipError::new(e),
         })?;
-        let name = entry.name().replace('\\', "/");
+        let name = entry
+            .name()
+            .map_err(|e| DecodeError::Zip {
+                path: input_path.to_path_buf(),
+                source: ZipError::new(e),
+            })?
+            .replace('\\', "/");
         if let Some(flow_id) = match_flow_definition_path(&name) {
             definitions.push((flow_id, i));
         }
