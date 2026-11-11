@@ -2,13 +2,13 @@
 
 ## Reporting a vulnerability
 
-Please report suspected vulnerabilities privately through GitHub Security Advisories at https://github.com/excelano/paxc/security/advisories/new. If you would rather not use GitHub, email david.anderson@excelano.com instead. I aim to respond within seven days.
+Please report suspected vulnerabilities privately, using the **Report a vulnerability** button on the Security tab of the repository concerned. If that button is not there, or you would rather not go through GitHub, email david.anderson@excelano.com instead. I aim to respond within seven days.
 
 Please do not open public issues for security problems.
 
 ## Supported versions
 
-The latest release receives security fixes. Older versions are not supported. Fixes ship in a new tagged release; update the way you installed.
+The latest release receives security fixes. Older versions are not supported. A fix ships in a new release; update the way you installed.
 
 ## What paxc can access
 
@@ -18,7 +18,7 @@ The companion `paxr` interpreter behaves identically with respect to system acce
 
 ## What paxc stores
 
-paxc writes only the output files you ask it to write. It does not maintain any persistent state, cache, or credential store on disk.
+paxc writes only the output files you ask it to write, and `paxc --install-skill` writes the Claude Code skill into `~/.claude/skills/paxc/`. It does not maintain any persistent state, cache, or credential store on disk.
 
 ## Working with real Power Automate exports
 
