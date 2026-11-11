@@ -1,9 +1,10 @@
+# Author: David M. Anderson
+# Built with AI assistance (Claude, Anthropic)
+
 name: CI
 
-# Runs the suite when asked (`gh workflow run ci.yml`). Until this existed, the unit
-# tests and the integration suites in tests/ had only ever run on a developer
-# machine, while release.yml built and shipped artifacts off a tag without
-# having compiled a single test.
+# Runs the unit tests and the integration suites in tests/ when asked
+# (`gh workflow run ci.yml`).
 #
 # Style and tests are separate jobs on purpose: a formatting slip should not
 # hide a test failure behind an early exit.
