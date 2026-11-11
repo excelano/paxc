@@ -5,14 +5,17 @@
 //! common tail here means the four-flag standard (`--version`, `-V`,
 //! `--help`, `-h`) and the skill flags are stated once instead of in two
 //! places that drift apart.
+//!
+//! Author: David M. Anderson
+//! Built with AI assistance (Claude, Anthropic)
 
 use std::process;
 
 /// The trailing section every pax binary's usage block carries verbatim.
 pub const COMMON_FLAGS: &str = "\
 Other flags:
-  --color <WHEN>  auto (default), always, or never. auto colours a terminal and
-                  goes plain when piped, honouring NO_COLOR
+  --color <WHEN>  auto (default), always, or never. auto colors a terminal and
+                  goes plain when piped, honoring NO_COLOR
   --help, -h      print this help and exit
   --version, -V   print the version and exit
 
