@@ -30,7 +30,7 @@ paxr --version
 | `--quiet` / `-q` (paxr) | suppress all output; exit code only |
 | `--debug` / `-d` (paxr) | print only `debug()` output, no state dump |
 | `--list-codes` (paxc) | print every finding code, one per line, and exit 0. The vocabulary `--allow` accepts, readable without provoking an error to see it |
-| `--color WHEN` (both) | `auto` (default), `always`, or `never`. `auto` colours a terminal and goes plain when piped, honouring `NO_COLOR`; `always` wins over `NO_COLOR`, since naming the flag is a decision. Box-drawing follows the terminal independently, dropping to ASCII when piped |
+| `--color WHEN` (both) | `auto` (default), `always`, or `never`. `auto` colors a terminal and goes plain when piped, honoring `NO_COLOR`; `always` wins over `NO_COLOR`, since naming the flag is a decision. Box-drawing follows the terminal independently, dropping to ASCII when piped |
 | `--version` / `-V` (both) | print version and exit |
 
 `<file.pax>` may be `-`, which reads the source from stdin; diagnostics then name
@@ -54,7 +54,9 @@ coercion between int and float except at variable initialization (an int literal
 assigned to a float-typed `var` is coerced). Arithmetic promotes to float when
 either operand is float; `int / int` stays int (matching PA's integer division).
 Float literals require a digit after the decimal point (`1.5`, `0.25`) so
-`obj.field` is never ambiguous.
+`obj.field` is never ambiguous. So `var budget: float = 5` followed by
+`budget += 0.5` gives `5.5`. Array and object literals use JSON-like syntax, and
+trailing commas are permitted.
 
 paxr treats `5 == 5.0` as true for local simulation ergonomics. PA's expression
 language uses strict JToken equality and would consider them unequal; do not
@@ -75,14 +77,22 @@ terminate <status> [message] [code expr]
 ```
 
 A `var` with no initializer emits `InitializeVariable` with `value` omitted;
-PA then supplies the type's zero value at runtime. This is the shape PA's own
+PA then supplies the type's zero value at runtime (0, 0.0, empty string, false,
+empty array, empty object), and paxr does the same. This is the shape PA's own
 designer produces, so decoded flows typically look this way.
 
+`var` declarations are top-level only. A `var` inside an `if` branch, a `switch`
+case, or a `foreach`, `until` or `scope` body is rejected; a `let` there is
+scoped to that body and does not leak to sibling cases or the enclosing scope.
+
 String literals use double quotes with escape sequences `\n`, `\t`, `\"`, `\\`.
+paxc rewrites them into PA's single-quoted string convention on emit.
 
 `//` starts a line comment and runs to the end of the line; there is no block
 form. `#` is **not** a comment — it is a lex error, which is worth knowing
-because so many configuration languages take it.
+because so many configuration languages take it. Comments leave nothing in the
+emitted flow; a note meant to survive into Power Automate belongs in a `pa/`
+file.
 
 ## Expressions
 
@@ -98,7 +108,10 @@ Operator precedence (tightest to loosest):
 | Logical AND | `&&` |
 | Logical OR | `\|\|` |
 
-Parens override normally. In emitted JSON, expressions become PA expression
+Arithmetic binds tighter than `&`, so `"Remaining: " & total - completed`
+subtracts first, and `&&` binds tighter than `||`. Parens override normally,
+and the decoder emits them where an operator would otherwise re-bind inside a
+larger expression. In emitted JSON, expressions become PA expression
 strings: `@{...}` wrapping for interpolated contexts (e.g. inside a `let`
 value's `inputs`), bare function form for `if` conditions
 (`@greater(variables('completed'), 0)`). paxc picks the wrapping.
@@ -111,8 +124,11 @@ obj?["non/ident/key"]  // subscript for non-identifier string keys
 arr?[0]                // subscript for numeric index
 ```
 
-Subscript keys must be a string literal or non-negative integer literal — no
-expressions. Chains mix freely: `triggerBody()?["body/value"].name`.
+Dot access works on object variables, object literals, and a `foreach`
+iterator, and emits PA's safe-navigation form
+(`variables('config')?['endpoints']?['primary']`). Subscript keys must be a
+string literal or non-negative integer literal — no expressions. Chains mix
+freely: `triggerBody()?["body/value"].name`.
 paxr uses null-safe semantics: missing keys, out-of-range indexes, and
 type-mismatched targets yield `null` instead of erroring (matching PA's
 `?[...]`).
@@ -130,8 +146,8 @@ inside `pa/*.json`:
 | `triggerBody()`, `triggerOutputs()`, `trigger()` | returns `null` with `<skipping unknown "…">` (no runtime data locally) |
 | `parameters("name")` | returns `null` with `<skipping unknown "…">` |
 | `body("actionKey")`, `outputs("actionKey")`, `actions("actionKey")` | returns `null` with `<skipping unknown "…">` |
-| `iterationIndexes("loopKey")` | returns the active `foreach` iteration counter |
-| `item()` | returns the current `foreach` item (via the iterator name) |
+| `iterationIndexes("loopKey")` | returns the active `foreach` iteration counter; `null` with the skip notice outside that loop |
+| `item()` | returns `null` with `<skipping unknown "item">`; inside a `foreach` body, read the current item through the iterator name instead |
 
 ## Control flow
 
@@ -156,8 +172,8 @@ switch subject {
 ```
 
 Compiles to `Switch`. Case values are **scalar literals only** — string, int, or
-bool. Arbitrary expressions in a case clause are rejected. `default` is
-optional; no matching case is a no-op.
+bool, the same constraint PA enforces. Arbitrary expressions in a case clause
+are rejected. `default` is optional; no matching case is a no-op.
 
 ### foreach
 
@@ -185,7 +201,8 @@ Compiles to `Until`. Optional trailing clauses (must appear in the order
 paxr caps its local iteration at the user-set `max` (or 60); on cap-hit it
 prints `<until "Until" hit iteration cap of N>` so you can tell a capped exit
 from a natural one. paxr ignores `timeout` (no wall-clock simulation); PA still
-enforces it.
+enforces it. A `terminate` inside a `foreach` or `until` body halts the loop
+and the program.
 
 ### scope
 
@@ -194,8 +211,9 @@ scope [name] { … }
 ```
 
 Wraps a block in a `Scope` action — a `runAfter` unit and the attachment point
-for `on` handlers. Named: action key `Scope_<name>`. Anonymous: `Scope`,
-auto-suffixed when repeated.
+for `on` handlers. A statement after the scope chains to the scope itself, not
+to its last inner action. Named: action key `Scope_<name>`. Anonymous: `Scope`,
+auto-suffixed when repeated; an anonymous scope registers no name.
 
 ### on handlers
 
@@ -205,8 +223,10 @@ on <status> [or <status>]* <target> { … }
 
 Statuses: `succeeded`, `failed`, `skipped`, `timedout` (mirrors PA's
 `runAfter` set). Target: a **named scope** or **`pa <Name>`** declared earlier
-in the source. Compiles to a `Scope` whose `runAfter` points at the target
-with the listed status array.
+in the source; anything else is a resolve error ("not a named scope or pa
+action"). A `pa` action needs no wrapping scope, which makes a connector call
+the natural place for a handler. Compiles to a `Scope` whose `runAfter` points
+at the target with the listed status array.
 
 Handler action name: `On_<status>_<target>` for single-status, or
 `On_<status1>_<status2>_…_<target>` for multi-status; auto-suffixed on collision.
@@ -237,8 +257,9 @@ terminate failed "message" code "CODE"
 terminate failed code "CODE"
 ```
 
-Compiles to `Terminate` with `runStatus` set. `message` and `code` are only
-accepted after `failed` (PA ignores `runError` on the other statuses). Both
+Compiles to `Terminate` with `runStatus` set and, for `failed`, a `runError`
+block carrying whichever of `code` and `message` are given. `message` and
+`code` are only accepted after `failed` (PA ignores `runError` on the other statuses). Both
 are expressions; `&` concat and variable references work. `code` is a
 contextual keyword — `terminate failed code` (with `code` a string variable)
 still parses as the message-only form.
@@ -254,8 +275,15 @@ debug(x)                    // auto-labeled with the source slice
 debug(x, y, x - y)          // comma-separated, single line
 ```
 
-paxr-only. paxc strips every `debug()` at compile time (they don't participate
-in `runAfter`) and prints `note: dropped N debug() statement(s)` to stderr.
+paxr-only, and legal anywhere a statement is. paxr prints one line per call:
+
+```
+debug: total=10 at line 7
+debug: total=10, completed=7 at line 10
+```
+
+paxc strips every `debug()` at compile time (they don't participate in
+`runAfter`) and prints `note: dropped N debug() statement(s)` to stderr.
 
 ## The `pa` primitive and file convention
 
@@ -265,26 +293,36 @@ filename and a valid pax identifier).
 
 - **Actions:** `pa/<Name>.json` — the file's contents drop verbatim into
   `definition.actions[<Name>]`. Any `runAfter` inside the file is informational
-  — paxc's structural sequence wins on emit.
+  — paxc's structural sequence wins on emit. paxr cannot call a connector, so it
+  prints `<skipping pa action "Name">` and moves on.
 - **Triggers:** a single `pa/<Name>.trigger.json` selects the trigger. Filename
   stem = trigger key; contents drop into `definition.triggers[<Name>]`. Zero
-  files → default manual "Button" trigger. Two or more → compile error.
+  files → default manual trigger,
+  `{"manual": {"type": "Request", "kind": "Button", "inputs": {}}}`. Two or
+  more → compile error. Never write a `pa` statement for a trigger: `pa
+  When_an_item_is_created` beside `pa/When_an_item_is_created.trigger.json` is
+  an error. paxr does not execute triggers.
 - **Connection references:** `pa/connectionReferences.json` (contents drop at
-  the emitted flow's top level).
+  the emitted flow's top level, and the packager places them where the legacy
+  import expects). Absent file, absent field, which is right for a
+  connector-free flow.
 
 Inside those JSON files you write PA expression syntax directly:
-`variables('x')`, `outputs('Compose_x')`, `triggerBody()`. A value that is
-nothing but an expression is written bare and keeps its type
-(`"@variables('total')"`); a value mixing text and expressions interpolates
-them one pair of braces at a time (`"<p>@{variables('total')}</p>"`) and always
-produces a string. The convention is byte-for-byte with PA's "Peek code" output
-— that guarantees round-trip fidelity. `connectors.md` has verified bodies for
-the common connectors.
+`variables('x')`, `outputs('Compose_x')`, `triggerBody()`. Whether a value is
+written bare (`"@variables('total')"`) or braced (`"@{variables('total')}"`)
+changes its type; *Expressions inside a body* in `connectors.md` gives the
+rule. The convention is byte-for-byte with PA's "Peek code" output — that
+guarantees round-trip fidelity. `connectors.md` has verified bodies for the
+common connectors.
 
 ## Function calls
 
 Function names pass through to PA's expression language unchanged; paxc does
-not distinguish "built-in" from "unknown." paxr implements a subset for local
+not distinguish "built-in" from "unknown", so any function in PA's expression
+reference is valid in pax, nested calls included. A call used as an `if`
+condition is wrapped in `equals(..., true)`, since paxc cannot prove it returns
+a boolean. A compile does check `pa/` bodies for calls to functions PA does not
+define; see *Checking a flow*. paxr implements a subset for local
 evaluation (anything outside the subset returns `null` with a
 `<skipping unknown "name">` notice):
 
@@ -301,7 +339,8 @@ Semantics worth knowing:
 
 - `length`, `empty`, and `contains` accept strings, arrays, and objects.
 - `startsWith`, `endsWith`, `indexOf`, `lastIndexOf` are **case-insensitive**
-  in PA and paxr; `string contains` is case-sensitive.
+  in PA and paxr. String `contains` is case-sensitive; array `contains` is a
+  membership test; object `contains` checks for a key.
 - `min` / `max` take variadic numeric args OR a single array.
 - `coalesce` returns the first argument that is not `null`; `""` and `0` are
   not null.
@@ -425,8 +464,20 @@ for a defect.
 
 ## Round-trip decoder coverage
 
-`paxc --decode` lowers the following to native pax; anything else falls back
-to `pa <Name>` with the action body byte-for-byte in `pa/`:
+`paxc --decode` reads a legacy package `.zip` (extracting the inner definition
+in memory, and refusing a zip with zero or several flow folders rather than
+guessing) or a bare `definition.json`, and writes into the output directory:
+
+- a `.pax` source file;
+- `pa/<TriggerName>.trigger.json`, the trigger body byte-for-byte;
+- `pa/<ActionName>.json` for every action that did not lower to pax;
+- `pa/connectionReferences.json`, when the export has connection references;
+- `pa/flow.json`, carrying `displayName`, `contentVersion`, and the
+  `actionNameMap` described below. A later `--target pa-legacy` compile with no
+  `--name` takes the package name from this `displayName`.
+
+It lowers the following to native pax; anything else falls back to
+`pa <Name>` with the action body byte-for-byte in `pa/`:
 
 **Native (lowers to pax source):**
 
@@ -447,7 +498,8 @@ to `pa <Name>` with the action body byte-for-byte in `pa/`:
 - `If` conditions: both `@`-string form and PA designer's structured-object form
   (`{"and": [{"equals": [...]}]}`).
 - `items('<For_each_action_key>')` inside a foreach body lowers to the iterator name.
-- PA accessors listed above.
+- PA accessors listed above, as ordinary pax call expressions, and
+  `outputs(...)` of any action other than a lowered Compose.
 - Path segments: identifier keys → `.field`; non-identifier keys and numeric
   indexes → `?["…"]`.
 
@@ -464,8 +516,8 @@ fallback re-encodes byte-for-byte on `paxc --target pa-legacy`, so a partial
 native decode is still a lossless round-trip.
 
 **`actionNameMap`:** action keys with characters outside pax's identifier rules
-(`Send_an_email_(V2)`) are normalized on decode; the original→normalized map is
-stored in `pa/flow.json.actionNameMap`. The encoder reads it and restores the
+are normalized on decode (`Send_an_email_(V2)` → `Send_an_email_V2`); the
+original→normalized map is stored in `pa/flow.json.actionNameMap`. The encoder reads it and restores the
 original key byte-for-byte. Missing or malformed `pa/flow.json` falls back to
 the user-written name verbatim.
 

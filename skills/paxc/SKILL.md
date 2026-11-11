@@ -46,7 +46,7 @@ pax owns the programmable parts of a flow (variables, control flow, expressions)
 PA-specific parts (connector calls, ParseJson, non-default triggers, connection
 references) live in JSON files under a `pa/` folder next to the source. paxc
 drops those files verbatim into the emitted flow. The shape of those files is
-PA's, not pax's, which is why a connector body is written rather than modelled
+PA's, not pax's, which is why a connector body is written rather than modeled
 in pax syntax — and why `connectors.md` in this directory carries verified
 bodies for the connectors that come up most.
 
@@ -56,13 +56,12 @@ pax replaces something tedious. For an agent, it replaces nothing — it is the
 only route from a request to a working flow, and the loop it makes possible is
 worked end to end below.
 
-The authoritative sources for pax and paxc are the binary itself (`paxc --help`),
-[README](https://github.com/excelano/paxc/blob/main/README.md), and
-[REFERENCE.md](https://github.com/excelano/paxc/blob/main/REFERENCE.md); if
-anything here conflicts with them, they win. These recipes assume a paxc that ships
-the round-trip decoder (`paxc --decode`), the file-based `pa/` folder convention,
-the `on <status>` error-path handlers, and the `switch` / `until` / `scope` /
-`terminate` statements. Check for `--decode` in `paxc --help`, and expect an older
+The authoritative source for paxc is the binary itself (`paxc --help`); if
+anything here conflicts with it, the binary wins. `reference.md` in this
+directory is the full language and CLI reference. These recipes assume a paxc
+that ships the round-trip decoder (`paxc --decode`), the file-based `pa/`
+folder convention, the `on <status>` error-path handlers, and the `switch` /
+`until` / `scope` / `terminate` statements. Check for `--decode` in `paxc --help`, and expect an older
 copy to reject the statement keywords as syntax errors; if any are missing, upgrade with
 `sudo apt install --only-upgrade paxc` (Debian/Ubuntu) or the way you installed it.
 
@@ -81,9 +80,8 @@ implicit for triggers and connection references).
 Writing a connector body is expected; guessing its shape is not. What a body
 needs is the operation's `operationId` and its exact parameter keys, and there
 are three places to get them, in order: `connectors.md` in this directory, which
-carries verified bodies for SharePoint, Outlook, Teams, Forms and Approvals;
-Microsoft's connector reference at `learn.microsoft.com/connectors/<apiname>/`,
-whose parameter **Key** column is exactly what goes in `inputs.parameters`; or
+carries verified bodies for the connectors that come up most; Microsoft's
+connector reference at `learn.microsoft.com/connectors/<apiname>/`, parameter **Key** column is exactly what goes in `inputs.parameters`; or
 PA's own "Peek code" on an existing action, pasted verbatim, which `paxc
 --decode` will also lift out of an export wholesale.
 
@@ -108,41 +106,48 @@ JSON to stdout — useful for `diff`ing before and after a source edit.
 
 Both binaries take `--version` (or `-V`) and `--help` (or `-h`).
 
-## Checking a flow (`--check`)
+## Checking a flow (compile and `--check`)
 
-Compiling a `.pax` file validates the pax source and nothing else. The JSON
-files under `pa/` are dropped in verbatim, unopened — and most of a real flow's
-expressions live in exactly those files, in a connector's mail body or filter
-query. A wrong variable name there is not a compile error. It is an empty
-subject line at run time, and nothing in PA will tell you either.
+Most of a real flow's expressions live in the JSON files under `pa/`, in a
+connector's mail body or filter query, and paxc carries those files into the
+flow verbatim. It does not carry them unread. A compile runs the same checks as
+`--check` over the flow it is about to emit, and reports anything found inside
+a `pa/` body against the line in that file. A wrong variable name in a mail
+body is a compile error, not an empty subject line at run time. An error fails
+the compile and nothing is written, no JSON and no `.zip`.
 
-`--check` reads the other end: the `definition.json` PA actually consumes,
-whether that came out of `paxc`, out of an export, or out of somebody's editor.
-Because it works on the finished artifact, it sees inside the `pa/` bodies that
-the compiler carries past.
+`--allow <CODE>` demotes one finding code from error to warning (repeatable;
+`--list-codes` prints the vocabulary). The finding is still reported. It is for
+when paxc is wrong about a flow, or when a decoded export arrives with a problem
+you mean to fix later; `reference.md` has the rest of the compile-time rules.
 
-It reports `runAfter` edges that name an action which does not exist, or which
-exists in another scope and so can never fire; cycles, and the actions stranded
-behind them; run statuses that are not run statuses; references to variables,
-actions and loop items that resolve to nothing; and unbalanced parentheses,
-quotes and `@{` interpolations. Near-miss names come back with a suggestion.
-Exit status is 1 when anything is an error and 0 when only warnings are, so it
-can gate a step in a script.
+`--check` runs the checks on their own, against any `definition.json` or
+package, whether it came out of `paxc`, out of an export, or out of somebody's
+editor. It needs no `.pax` source.
+
+The checks report `runAfter` edges that name an action which does not exist,
+or which exists in another scope and so can never fire; cycles, and the actions
+stranded behind them; run statuses that are not run statuses; references to
+variables, actions and loop items that resolve to nothing; unbalanced
+parentheses, quotes and `@{` interpolations; and calls to functions PA does not
+define. Near-miss names come back with a suggestion. `--check` exits 1 when
+anything is an error and 0 when only warnings are, so it can gate a step in a
+script.
 
 Two gaps to know about, so their silence is not read as approval. Connector
 `operationId`s and parameter keys are not validated, so a body that names an
-operation the connector does not have still passes. Function names are not
-checked either. A clean run means the flow's wiring and references hold
-together, not that every connector body is right.
+operation the connector does not have still passes. Argument counts are not
+checked either, so a real function called with the wrong number of arguments
+passes. A clean run means the flow's wiring and references hold together,
+not that every connector body is right.
 
-Put it in the loop twice. Run it on what you compile, before handing over a
-package — it catches the cross-file mistakes that neither `paxc` nor `paxr` can
-see. Run it on any export before you start editing, because a flow that arrives
-with a dangling edge will still have one after your change, and you do not want
-to spend the afternoon owning somebody else's bug.
+Run `--check` on any export before you start editing, because a flow that
+arrives with a dangling edge will still have one after your change, and you do
+not want to spend the afternoon owning somebody else's bug. What you compile is
+checked already.
 
 ```sh
-paxc requests.pax > requests.json && paxc --check requests.json
+paxc --check MyFlow_2026.zip
 ```
 
 ## Language essentials
@@ -231,8 +236,10 @@ it into the `runAfter` graph in source order — the file's own `runAfter` (if
 any) is informational only.
 
 **Inside the JSON file you write PA expression syntax directly**:
-`@{variables('total')}` for variables, `@{outputs('Compose_x')}` for Compose
-outputs, `@{triggerBody()}` for trigger data. The convention is for the file to
+`variables('total')` for variables, `outputs('Compose_x')` for Compose outputs,
+`triggerBody()` for trigger data, each behind an `@`. Whether the expression is
+written bare or braced changes the value's type; *Expressions inside a body* in
+`connectors.md` gives the rule. The convention is for the file to
 match PA's "Peek code" output byte-for-byte — that guarantees round-trip
 fidelity.
 
@@ -330,11 +337,11 @@ pa Post_to_channel
 The two sides are joined by name and nothing else. `connectors.md`'s send-mail
 body reads `@variables('subject')`, and that is a live reference to the `var
 subject` above it; the same goes for `@variables('summary')` in the Teams body.
-paxc drops the file verbatim and never checks the name, so a mismatch is not a
-compile error — it is an empty subject line at run time. `paxc --check` on the
-compiled output is what catches it, and this is the mistake it exists for. Any
-field the trigger already carries can be read straight from the JSON side
-instead, which is what `emailMessage/To` should be here:
+paxc drops the file in verbatim but checks it on the way, so a mismatch such as
+`@variables('subjet')` fails the compile with the line in `Send_email.json`
+underlined and a suggestion of `subject`. Any field the trigger already carries
+can be read straight from the JSON side instead, which is what
+`emailMessage/To` should be here:
 `"@triggerBody()?['OwnerEmail']"`.
 
 Run it locally before packaging anything. `paxr requests.pax` executes the
@@ -346,8 +353,7 @@ the stub-and-fix pattern below.
 
 ```sh
 paxr requests.pax                     # control flow only
-paxc requests.pax > requests.json     # emit the definition
-paxc --check requests.json            # cross-file references, runAfter graph
+paxc requests.pax > requests.json     # emit the definition, checking the pa/ bodies
 paxc --target pa-legacy --name requests --out requests.zip requests.pax
 ```
 
@@ -397,17 +403,17 @@ items" body (from PA "Peek code") into `pa/Get_pending_items.json`.
 paxc --check MyFlow_2026.zip            # what is already wrong, before you touch it
 paxc --decode MyFlow_2026.zip           # → MyFlow_2026/definition.pax + pa/
 $EDITOR MyFlow_2026/definition.pax      # refactor: extract a scope, add an on-failed handler, etc.
-paxc MyFlow_2026/definition.pax > after.json
-paxc --check after.json                 # compare against the first run
+paxc MyFlow_2026/definition.pax > after.json   # compiles and checks
 paxc --target pa-legacy \
   --name MyFlow_2026 \
   --out MyFlow_2026_edited.zip \
   MyFlow_2026/definition.pax            # re-emit → import through PA
 ```
 
-Checking before and after is worth the extra step. A flow that arrives with a
-broken reference still has one afterwards, and the two runs together say which
-findings you introduced and which you inherited.
+Checking before you edit says which findings you inherited. The compile
+afterwards reports every error, inherited or introduced, and refuses to write
+until each is fixed or demoted with `--allow <CODE>`; the first run tells you
+which are yours.
 
 Fallback `pa <Name>` blocks in the decoded output are fine — they re-emit
 byte-for-byte, so a partial-native decode is still a lossless round-trip.
