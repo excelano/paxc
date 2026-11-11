@@ -46,8 +46,3 @@ assets = [
     ["skills/paxc/reference.md", "usr/share/doc/paxc/reference.md", "644"],
     ["LICENSE", "usr/share/doc/paxc/copyright", "644"],
 ]
-
-# The profile that 'dist' will build with
-[profile.dist]
-inherits = "release"
-lto = "thin"
