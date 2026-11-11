@@ -64,21 +64,6 @@ sudo apt install paxc && paxc --install-skill
 
 Both `paxc` and `paxr` are installed into `/usr/bin/`, with reference docs at `/usr/share/doc/paxc/`. Supported architectures: `amd64`, `arm64`.
 
-### Homebrew
-
-On macOS or Linux, tap and trust the repository once — Homebrew gates third-party taps behind explicit trust:
-
-```sh
-brew tap excelano/tap
-brew trust excelano/tap
-```
-
-Then install it, so `brew upgrade` keeps it current. Installs both `paxc` and `paxr`:
-
-```sh
-brew install paxc && paxc --install-skill
-```
-
 ### Windows
 
 With [WinGet](https://learn.microsoft.com/windows/package-manager/), so `winget upgrade` keeps it current (installs both `paxc` and `paxr`):
@@ -118,7 +103,7 @@ paxc --install-skill
 
 That writes `~/.claude/skills/paxc/` and stamps in the skill's revision, which `paxc -V` also prints, so a later run reports whether the skill has fallen behind the binary rather than leaving you to notice. It is safe to re-run: an unchanged skill reports `already current` and nothing is written. `paxc --uninstall-skill` removes it. Restart Claude Code afterwards, since skills are discovered at session start.
 
-The skill is compiled into the binary, so this works the same however you installed paxc — apt, Homebrew, cargo, or a build from source.
+The skill is compiled into the binary, so this works the same however you installed paxc — apt, cargo, or a build from source.
 
 ## Uninstall
 
